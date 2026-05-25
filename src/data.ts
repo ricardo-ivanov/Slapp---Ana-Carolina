@@ -1,0 +1,218 @@
+import { Leader, Registration, FormField, UserProfile } from './types';
+
+export const INITIAL_PROFILE: UserProfile = {
+  name: 'Ana Carolina Oliveira',
+  email: 'ana.carolina@lideranca.com',
+  phone: '(11) 98765-4321',
+  cpf: '123.456.789-00',
+  avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
+};
+
+export const INITIAL_LEADERS: Leader[] = [
+  {
+    id: 'l1',
+    name: 'Maria Souza',
+    email: 'maria.souza@lideranca.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBylZWPul313G6ogEHZVPI4xWpYK7YX7sMKoQ-ARyVtPA-z2bKcu_13Z3ClToOclVyDnn8VySsuCiP94luQALeb82usYQP6Q0MqXrg4juL94JSRK1_EwwaZpWa7bHvAqeJ5GLc5eArbwfxowgyFi3UK2Fe9HGNDSNfOHxHWiDOYCbzMRyp88sD8WvRBNYuamCkYmi50U8xZLHWYSQLqwq2kIheOBnN8KSn7XMRH8aul0bx37NS9axTvRS22dd8OX5nHSBF49oCiHEbU',
+    registrationCount: 156,
+    status: 'Ativo',
+    phone: '(11) 97123-4567',
+  },
+  {
+    id: 'l2',
+    name: 'Carlos Alberto Silva',
+    email: 'carlos.silva@lider.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBqSqcWc2kJo5-jPOAsbeGIb73aG0i_QnKy9b-NmRm3CWjLDJj4hYwyMD3D8hoylJyWJr2TNTScNu6gweCSmnYvCLbCAlhNTQ2BMZE5YnNxIzMvoAZ2P0JNm0DXeAEmRBgegNC_W7C-vKE26uOQpcfSt52h0K4UZnWBTXokjMEBuZyJq8qoHxpEzIjbC78LKdoM5eTOIK9y-kzr0kb3cKL5aD46C_lP1tU9KHX7Uv7ixekHZh-ZryJEIwsri-E3rBGiMVgf5oCpXZOc',
+    registrationCount: 1420,
+    status: 'Ativo',
+    phone: '(11) 98223-4455',
+  },
+  {
+    id: 'l3',
+    name: 'João Silva',
+    email: 'joao.silva@lideranca.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuB0grgNMf3J0ooC9vRLefYi8OML2RW1ZZ2uwSMCkWzuWtEXkHDigjW2hJL9YcqzZ-Hmh90Jhia8Y5WzZMtSSVrKZl5YCGWPaj6ti5B7RinDuwrNQAha91qZmz8dkuz77WzNi2yvVoQtT-EY6NtBzJI-Y9DFrHJMGGXuyby52eT3Rd0f9j6GXRimZLFjpaYidGQfum2ac7rzGRkgxntQQ6EoQknjUreMXq27Cm8KbjztesL-qMheY9hBmNlOXbwvDVXVM7-7nRtytf6p',
+    registrationCount: 185,
+    status: 'Ativo',
+    phone: '(11) 96554-3321',
+  },
+  {
+    id: 'l4',
+    name: 'Mariana Costa',
+    email: 'mariana.costa@email.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAMyPG6Hb93_qFMDR8kndm5P-WgaH8z7F_IYwaz29qgZAQcJo6WQAVfUqM-NsnPfGBUgxsCGuXX-eouP9cwh3p0XwyVUqAtsuMb4r_AI6r3yvsVXykVmqacZBhvY3YAU0xZDgx-bjcnBpZq6rOgMRZxfq5KpiZzagei053-x4fs8SLyOfikJ7vDh5B7LpBIGg6xLTbyZ28aQFHyVJ66luyiP_KdOUtPyjyeZVjiwqy6fifAq_mMema4NR8gwjarNJ2nEPGFCLRR36uq',
+    registrationCount: 982,
+    status: 'Ativo',
+    phone: '(21) 98888-7766',
+  },
+  {
+    id: 'l5',
+    name: 'Lucas Lima',
+    email: 'lucas.lima@lider.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCdOGifY_bL7FQNCFWcqIXsWB_yvsB7aH1kO7bGsKOq7acEAMmPIItRIUf68VYibnbYvOd-ibyE3-UnIjEYaryD5axIm16wFHQ2gdBrz6FRgkndT4j4P-Qor45m5CYAWwl23uJpxnBeP-c3AV1BLltEJw20QNmDgfghcCa5_N_hx00yL9PTawhVdUEMZrGKwpDaMHMHN4MMwD_dmM5h_QUN6TTYobqTZw7lGj4U6JNgRjAASwxI07o0xa75d8OY8w7z3WxW5s1xhnV7',
+    registrationCount: 112,
+    status: 'Ativo',
+    phone: '(11) 97766-1122',
+  },
+  {
+    id: 'l6',
+    name: 'Fernanda Dias',
+    email: 'fernanda.dias@liderança.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBlQT9LGeFUpuxB2yR3O2dfhz7zL_eSrrf2llLaenfKeBzx3c3J3zYM973XoPvQV_SP3gWHw8zVOPTeWrmUE53uGYtm3w7Bs8A4QPAjJXev9HcHLy4OcaHMuqRDkjkwpZhSK12jQHcLvih0Rn-izp-bUb2-XYNf3G_PUb5OG-zo2-2fRfPwlnRJxwzAcOOumFNfjh2-jaA6YfdyZtQQFX-3m4T_jHZLa0yzVhHjtH78ussE05tquWUYfJaU-Jp04y7c0W_RikwEsD9U',
+    registrationCount: 98,
+    status: 'Ativo',
+    phone: '(11) 96554-1100',
+  },
+  {
+    id: 'l7',
+    name: 'Roberto Mendes',
+    email: 'roberto.mendes@gestao.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCdOGifY_bL7FQNCFWcqIXsWB_yvsB7aH1kO7bGsKOq7acEAMmPIItRIUf68VYibnbYvOd-ibyE3-UnIjEYaryD5axIm16wFHQ2gdBrz6FRgkndT4j4P-Qor45m5CYAWwl23uJpxnBeP-c3AV1BLltEJw20QNmDgfghcCa5_N_hx00yL9PTawhVdUEMZrGKwpDaMHMHN4MMwD_dmM5h_QUN6TTYobqTZw7lGj4U6JNgRjAASwxI07o0xa75d8OY8w7z3WxW5s1xhnV7',
+    registrationCount: 45,
+    status: 'Inativo',
+    phone: '(11) 97722-0099',
+  },
+  {
+    id: 'l8',
+    name: 'Fernanda Lima',
+    email: 'fernanda.lima@parceiro.com',
+    avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAMyPG6Hb93_qFMDR8kndm5P-WgaH8z7F_IYwaz29qgZAQcJo6WQAVfUqM-NsnPfGBUgxsCGuXX-eouP9cwh3p0XwyVUqAtsuMb4r_AI6r3yvsVXykVmqacZBhvY3YAU0xZDgx-bjcnBpZq6rOgMRZxfq5KpiZzagei053-x4fs8SLyOfikJ7vDh5B7LpBIGg6xLTbyZ28aQFHyVJ66luyiP_KdOUtPyjyeZVjiwqy6fifAq_mMema4NR8gwjarNJ2nEPGFCLRR36uq',
+    registrationCount: 2890,
+    status: 'Ativo',
+    phone: '(19) 99345-6677',
+  }
+];
+
+export const INITIAL_REGISTRATIONS: Registration[] = [
+  {
+    id: 'r1',
+    name: 'Rodrigo Almeida Santos',
+    category: 'Alcoólicos Anônimos (AA)',
+    leaderId: 'l2',
+    leaderName: 'Carlos Alberto Silva',
+    date: '10:45',
+    createdAt: '2026-05-21T10:45:00Z',
+  },
+  {
+    id: 'r2',
+    name: 'Juliana Pereira Costa',
+    category: 'Autistas',
+    leaderId: 'l1',
+    leaderName: 'Maria Souza',
+    date: '09:12',
+    createdAt: '2026-05-21T09:12:00Z',
+  },
+  {
+    id: 'r3',
+    name: 'Carlos Eduardo Lima',
+    category: 'Alcoólicos Anônimos (AA)',
+    leaderId: 'l2',
+    leaderName: 'Carlos Alberto Silva',
+    date: 'Ontem',
+    createdAt: '2026-05-20T16:30:00Z',
+  },
+  {
+    id: 'r4',
+    name: 'Roberto de Almeida',
+    category: 'Dependentes Químicos',
+    leaderId: 'l1',
+    leaderName: 'Maria Souza',
+    date: '24/05/2026',
+    createdAt: '2026-05-24T14:30:00Z',
+  },
+  {
+    id: 'r5',
+    name: 'Camila Ferraro',
+    category: 'Autistas',
+    leaderId: 'l3',
+    leaderName: 'João Silva',
+    date: '24/05/2026',
+    createdAt: '2026-05-24T11:15:00Z',
+  },
+  {
+    id: 'r6',
+    name: 'Marcos Vinícius',
+    category: 'Alcoólicos Anônimos (AA)',
+    leaderId: 'l5',
+    leaderName: 'Lucas Lima',
+    date: '23/05/2026',
+    createdAt: '2026-05-23T16:45:00Z',
+  },
+  {
+    id: 'r7',
+    name: 'Beatriz Silveira',
+    category: 'Autistas',
+    leaderId: 'l6',
+    leaderName: 'Fernanda Dias',
+    date: '22/05/2026',
+    createdAt: '2026-05-22T09:20:00Z',
+  },
+  {
+    id: 'r8',
+    name: 'Juliana Mendes',
+    category: 'Empreendedores',
+    leaderId: 'l1',
+    leaderName: 'Maria Souza',
+    date: '21/05/2026',
+    createdAt: '2026-05-21T10:15:00Z',
+  },
+  {
+    id: 'r9',
+    name: 'Roberto Souza',
+    category: 'Estudantes',
+    leaderId: 'l2',
+    leaderName: 'Carlos Alberto Silva',
+    date: '20/05/2026',
+    createdAt: '2026-05-20T16:45:00Z',
+  },
+  {
+    id: 'r10',
+    name: 'Fernanda Lima',
+    category: 'Saúde',
+    leaderId: 'l2',
+    leaderName: 'Carlos Alberto Silva',
+    date: '19/05/2026',
+    createdAt: '2026-05-19T09:20:00Z',
+  }
+];
+
+export const INITIAL_FORM_FIELDS: FormField[] = [
+  {
+    id: 'f1',
+    type: 'text',
+    label: 'Nome Completo',
+    placeholder: 'Digite o nome...',
+    required: true,
+  },
+  {
+    id: 'f2',
+    type: 'cpf',
+    label: 'Documento (CPF)',
+    placeholder: '000.000.000-00',
+    required: true,
+  },
+  {
+    id: 'f3',
+    type: 'email',
+    label: 'E-mail de Contato',
+    placeholder: 'exemplo@email.com',
+    required: false,
+  },
+  {
+    id: 'f4',
+    type: 'select',
+    label: 'Região / Setor',
+    required: false,
+    options: ['Regional Norte', 'Regional Sul', 'Regional Leste', 'Regional Oeste'],
+  }
+];
+
+export const CATEGORIES_LIST = [
+  'Alcoólicos Anônimos (AA)',
+  'Dependentes Químicos',
+  'Autistas',
+  'Empreendedores',
+  'Estudantes',
+  'Saúde',
+  'Outros'
+];

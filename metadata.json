@@ -1,0 +1,6 @@
+{
+  "name": "Efficient Administrative Core",
+  "description": "Painel administrativo moderno e de alta densidade para gestão de lideranças e cadastros.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
