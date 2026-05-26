@@ -41,6 +41,36 @@ export async function testSupabaseConnection(): Promise<boolean> {
 }
 
 // ==========================================
+// ROLE DETERMINATION HELPER
+// ==========================================
+export function checkIfEmailIsAdmin(email: string): boolean {
+  if (!email) return false;
+  const e = email.trim().toLowerCase();
+  return e === 'contato@ricardoivanov.com.br' || e === 'ana.carolina@lideranca.com';
+}
+
+// ==========================================
+// PASSWORD ENCODING IN AVATAR HELPER
+// ==========================================
+export function encodePasswordInAvatar(avatarUrl: string, password?: string): string {
+  if (!password) return avatarUrl || '';
+  const cleanUrl = (avatarUrl || '').split('#pwd:')[0];
+  return `${cleanUrl}#pwd:${encodeURIComponent(password)}`;
+}
+
+export function decodePasswordFromAvatar(avatarUrl: string): { cleanUrl: string; password?: string } {
+  const url = avatarUrl || '';
+  if (url.includes('#pwd:')) {
+    const parts = url.split('#pwd:');
+    return {
+      cleanUrl: parts[0],
+      password: decodeURIComponent(parts[1])
+    };
+  }
+  return { cleanUrl: url, password: undefined };
+}
+
+// ==========================================
 // PROFILES API HELPERS
 // ==========================================
 export async function fetchProfile(profileId: string = 'p1'): Promise<UserProfile | null> {
@@ -52,12 +82,16 @@ export async function fetchProfile(profileId: string = 'p1'): Promise<UserProfil
       .eq('id', profileId)
       .single();
     if (error) throw error;
+    const decoded = decodePasswordFromAvatar(data.avatar_url || '');
     return {
+      id: data.id || profileId,
       name: data.name,
       email: data.email || '',
       phone: data.phone || '',
       cpf: data.cpf || '',
-      avatarUrl: data.avatar_url || ''
+      avatarUrl: decoded.cleanUrl,
+      isAdmin: checkIfEmailIsAdmin(data.email),
+      password: decoded.password
     };
   } catch (err) {
     console.error('Error fetching profile from Supabase:', err);
@@ -65,9 +99,37 @@ export async function fetchProfile(profileId: string = 'p1'): Promise<UserProfil
   }
 }
 
+export async function fetchProfileByEmail(email: string): Promise<UserProfile | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email.trim().toLowerCase())
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const decoded = decodePasswordFromAvatar(data.avatar_url || '');
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email || '',
+      phone: data.phone || '',
+      cpf: data.cpf || '',
+      avatarUrl: decoded.cleanUrl,
+      isAdmin: checkIfEmailIsAdmin(data.email),
+      password: decoded.password
+    };
+  } catch (err) {
+    console.error('Error fetching profile by email from Supabase:', err);
+    return null;
+  }
+}
+
 export async function upsertProfile(profileId: string, profile: UserProfile): Promise<boolean> {
   if (!supabase) return false;
   try {
+    const encodedAvatar = encodePasswordInAvatar(profile.avatarUrl, profile.password);
     const { error } = await supabase
       .from('profiles')
       .upsert({
@@ -76,7 +138,7 @@ export async function upsertProfile(profileId: string, profile: UserProfile): Pr
         email: profile.email,
         phone: profile.phone,
         cpf: profile.cpf,
-        avatar_url: profile.avatarUrl
+        avatar_url: encodedAvatar
       });
     if (error) throw error;
     return true;
@@ -97,16 +159,21 @@ export async function fetchLeaders(): Promise<Leader[] | null> {
       .select('*')
       .order('name', { ascending: true });
     if (error) throw error;
-    return data.map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      email: item.email || '',
-      phone: item.phone || '',
-      cpf: item.cpf || '',
-      avatarUrl: item.avatar_url || '',
-      registrationCount: item.registration_count || 0,
-      status: item.status || 'Ativo'
-    }));
+    return data.map((item: any) => {
+      const decoded = decodePasswordFromAvatar(item.avatar_url || '');
+      return {
+        id: item.id,
+        name: item.name,
+        email: item.email || '',
+        phone: item.phone || '',
+        cpf: item.cpf || '',
+        avatarUrl: decoded.cleanUrl,
+        registrationCount: item.registration_count || 0,
+        status: item.status || 'Ativo',
+        isAdmin: checkIfEmailIsAdmin(item.email),
+        password: decoded.password
+      };
+    });
   } catch (err) {
     console.error('Error fetching leaders from Supabase:', err);
     return null;
@@ -116,6 +183,7 @@ export async function fetchLeaders(): Promise<Leader[] | null> {
 export async function upsertLeader(leader: Leader): Promise<boolean> {
   if (!supabase) return false;
   try {
+    const encodedAvatar = encodePasswordInAvatar(leader.avatarUrl, leader.password);
     const { error } = await supabase
       .from('leaders')
       .upsert({
@@ -124,7 +192,7 @@ export async function upsertLeader(leader: Leader): Promise<boolean> {
         email: leader.email,
         phone: leader.phone,
         cpf: leader.cpf,
-        avatar_url: leader.avatarUrl,
+        avatar_url: encodedAvatar,
         registration_count: leader.registrationCount,
         status: leader.status
       });

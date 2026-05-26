@@ -18,6 +18,8 @@ export interface Leader {
   status: 'Ativo' | 'Inativo';
   phone: string;
   cpf?: string;
+  isAdmin?: boolean;
+  password?: string;
 }
 
 export interface FormField {
@@ -30,11 +32,14 @@ export interface FormField {
 }
 
 export interface UserProfile {
+  id?: string;
   name: string;
   email: string;
   phone: string;
   cpf: string;
   avatarUrl: string;
+  isAdmin?: boolean;
+  password?: string;
 }
 
 export type ActiveView = 'dashboard' | 'cadastros' | 'lideranças' | 'formulário' | 'relatórios' | 'perfil';

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -45,6 +45,8 @@ import {
   isSupabaseConfigured,
   testSupabaseConnection,
   fetchProfile,
+  fetchProfileByEmail,
+  checkIfEmailIsAdmin,
   upsertProfile,
   fetchLeaders,
   upsertLeader,
@@ -118,11 +120,11 @@ export default function App() {
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
     const stored = localStorage.getItem('isLoggedIn');
-    return stored ? JSON.parse(stored) : true; // Default to true so user sees the premium admin core first
+    return stored ? JSON.parse(stored) : false; // Default to false so user sees the login screen first
   });
 
-  const [loginEmail, setLoginEmail] = useState('ana.carolina@lideranca.com');
-  const [loginPassword, setLoginPassword] = useState('password123');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   // Administrative States
@@ -150,6 +152,8 @@ export default function App() {
     const stored = localStorage.getItem('active_view');
     return (stored as ActiveView) || 'dashboard';
   });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
   const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState(false);
@@ -206,6 +210,12 @@ export default function App() {
   const [newLeaderEmail, setNewLeaderEmail] = useState('');
   const [newLeaderPhone, setNewLeaderPhone] = useState('');
   const [newLeaderCPF, setNewLeaderCPF] = useState('');
+  const [newLeaderIsAdmin, setNewLeaderIsAdmin] = useState(false);
+  const [newLeaderPassword, setNewLeaderPassword] = useState('');
+  const [newLeaderConfirmPassword, setNewLeaderConfirmPassword] = useState('');
+  const [showNewLeaderPassword, setShowNewLeaderPassword] = useState(false);
+
+
 
   // Password edit input states
   const [currentPass, setCurrentPass] = useState('••••••••');
@@ -228,10 +238,25 @@ export default function App() {
 
   // Set default leader selection for new registrations
   useEffect(() => {
-    if (leaders.length > 0 && !newRegistrationLeader) {
-      setNewRegistrationLeader(leaders[0].id);
+    if (isLoggedIn) {
+      if (!profile.isAdmin && profile.id) {
+        setNewRegistrationLeader(profile.id);
+      } else if (leaders.length > 0 && (!newRegistrationLeader || !leaders.some(l => l.id === newRegistrationLeader))) {
+        setNewRegistrationLeader(leaders[0].id);
+      }
     }
-  }, [leaders, newRegistrationLeader]);
+  }, [leaders, newRegistrationLeader, isLoggedIn, profile.id, profile.isAdmin]);
+
+  // Enforce access control for Leadership role (non-admin)
+  useEffect(() => {
+    if (isLoggedIn && !profile.isAdmin) {
+      const allowedViews: ActiveView[] = ['dashboard', 'cadastros', 'perfil'];
+      if (!allowedViews.includes(activeView)) {
+        setActiveView('dashboard');
+        triggerNotification('Acesso restrito. Retornando ao Dashboard.', 'error');
+      }
+    }
+  }, [activeView, isLoggedIn, profile.isAdmin]);
 
   // Supabase Database Connection & Seeding effect
   useEffect(() => {
@@ -247,11 +272,19 @@ export default function App() {
       if (connected) {
         try {
           // 1. Fetch Profile
-          const dbProfile = await fetchProfile('p1');
-          if (dbProfile) {
-            setProfile(dbProfile);
+          if (isLoggedIn && profile?.email) {
+            const dbProfile = await fetchProfileByEmail(profile.email);
+            if (dbProfile) {
+              setProfile(dbProfile);
+            } else {
+              const pfId = profile.id || ('leader_' + Date.now());
+              await upsertProfile(pfId, profile);
+            }
           } else {
-            await upsertProfile('p1', INITIAL_PROFILE);
+            const dbProfile = await fetchProfile('p1');
+            if (!dbProfile) {
+              await upsertProfile('p1', INITIAL_PROFILE);
+            }
           }
 
           // 2. Fetch Leaders
@@ -333,22 +366,152 @@ export default function App() {
     }, 4000);
   };
 
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Size limit of 500kb = 500 * 1024 bytes
+    if (file.size > 500 * 1024) {
+      triggerNotification('A imagem de perfil deve ter no máximo 500kb.', 'error');
+      return;
+    }
+
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      triggerNotification('Formato de mídia não suportado. Use PNG, JPG, JPEG ou WEBP.', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        setProfile(prev => ({
+          ...prev,
+          avatarUrl: result
+        }));
+        triggerNotification('Imagem de perfil alterada com sucesso! Lembre-se de salvar suas alterações.', 'success');
+      }
+    };
+    reader.onerror = () => {
+      triggerNotification('Ocorreu um erro ao processar o arquivo.', 'error');
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Auth Handler
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginEmail.trim()) {
+    const emailLower = loginEmail.trim().toLowerCase();
+    if (!emailLower) {
       triggerNotification('Por favor, informe um email válido.', 'error');
       return;
     }
-    // Update administrative profile email dynamically if typed
-    setProfile(prev => ({
-      ...prev,
-      email: loginEmail,
-      name: loginEmail === 'ana.carolina@lideranca.com' ? 'Ana Carolina Oliveira' : prev.name
-    }));
-    setIsLoggedIn(true);
-    triggerNotification('Acesso concedido. Bem-vindo de volta!', 'success');
+
+    triggerNotification('Verificando credenciais...', 'info');
+
+    // 1. Try to fetch profile from Supabase by email
+    let existingProfile: UserProfile | null = null;
+    if (isSupabaseConnected) {
+      existingProfile = await fetchProfileByEmail(emailLower);
+    }
+
+    if (existingProfile) {
+      if (existingProfile.password && existingProfile.password !== loginPassword) {
+        triggerNotification('Senha incorreta! Por favor, tente novamente.', 'error');
+        return;
+      }
+      const isAdminRole = checkIfEmailIsAdmin(emailLower);
+      const userProfile: UserProfile = {
+        ...existingProfile,
+        isAdmin: isAdminRole
+      };
+      setProfile(userProfile);
+      setIsLoggedIn(true);
+      setActiveView('dashboard');
+      triggerNotification(`Acesso concedido como ${isAdminRole ? 'Administrador' : 'Liderança'}. Olá, ${userProfile.name}!`, 'success');
+      return;
+    }
+
+    // 2. Default administrator fallback if offline or not in DB yet
+    if (emailLower === 'ana.carolina@lideranca.com') {
+      const adminProfile: UserProfile = {
+        id: 'p1',
+        name: 'Ana Carolina Oliveira',
+        email: 'ana.carolina@lideranca.com',
+        phone: '(11) 98765-4321',
+        cpf: '123.456.789-00',
+        avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
+        isAdmin: true
+      };
+      setProfile(adminProfile);
+      setIsLoggedIn(true);
+      setActiveView('dashboard');
+      if (isSupabaseConnected) {
+        await upsertProfile('p1', adminProfile);
+      }
+      triggerNotification('Acesso Administrativo concedido. Bem-vindo de volta!', 'success');
+      return;
+    }
+
+    // Default admin check for ricardo
+    if (emailLower === 'contato@ricardoivanov.com.br') {
+      const adminProfile: UserProfile = {
+        id: 'p_ricardo',
+        name: 'Ricardo Ivanov',
+        email: 'contato@ricardoivanov.com.br',
+        phone: '(11) 99999-9999',
+        cpf: '000.000.000-00',
+        avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=256',
+        isAdmin: true
+      };
+      setProfile(adminProfile);
+      setIsLoggedIn(true);
+      setActiveView('dashboard');
+      if (isSupabaseConnected) {
+        await upsertProfile('p_ricardo', adminProfile);
+      }
+      triggerNotification('Acesso Administrativo concedido. Bem-vindo de volta!', 'success');
+      return;
+    }
+
+    // 3. Fallback matching existing leaders table
+    const matchingLeader = leaders.find(l => l.email.trim().toLowerCase() === emailLower);
+    if (matchingLeader) {
+      if (matchingLeader.status === 'Inativo') {
+        triggerNotification('Esta conta de liderança está inativa. Entre em contato com o administrador.', 'error');
+        return;
+      }
+      if (matchingLeader.password && matchingLeader.password !== loginPassword) {
+        triggerNotification('Senha incorreta! Por favor, tente novamente.', 'error');
+        return;
+      }
+      const isLeaderAdmin = checkIfEmailIsAdmin(emailLower);
+      const leaderProfile: UserProfile = {
+        id: matchingLeader.id,
+        name: matchingLeader.name,
+        email: matchingLeader.email,
+        phone: matchingLeader.phone,
+        cpf: matchingLeader.cpf || '',
+        avatarUrl: matchingLeader.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256',
+        isAdmin: isLeaderAdmin,
+        password: matchingLeader.password
+      };
+      setProfile(leaderProfile);
+      setIsLoggedIn(true);
+      setActiveView('dashboard');
+      if (isSupabaseConnected) {
+        await upsertProfile(matchingLeader.id, leaderProfile);
+      }
+      triggerNotification(`Acesso concedido como ${isLeaderAdmin ? 'Administrador' : 'Liderança'}. Olá, ${matchingLeader.name}!`, 'success');
+      return;
+    }
+
+    // 4. Default: User not found
+    triggerNotification('Credenciais inválidas ou e-mail não cadastrado. Caso necessite de acesso, entre em contato com o administrador.', 'error');
   };
+
+
 
   const handleLogout = () => {
     setIsLoggedIn(false);
@@ -1218,11 +1381,22 @@ export default function App() {
 
   // Delete registration
   const handleDeleteRegistration = (id: string, name: string) => {
+    const reg = registrations.find(r => r.id === id);
+    if (reg && !profile.isAdmin && reg.leaderId !== profile.id && reg.leaderName !== profile.name && reg.leaderEmail !== profile.email) {
+      triggerNotification('Você só pode remover cadastros feitos por você mesmo.', 'error');
+      return;
+    }
     setRegistrationToDelete({ id, name });
   };
 
   const confirmDeleteRegistration = () => {
     if (registrationToDelete) {
+      const reg = registrations.find(r => r.id === registrationToDelete.id);
+      if (reg && !profile.isAdmin && reg.leaderId !== profile.id && reg.leaderName !== profile.name && reg.leaderEmail !== profile.email) {
+        triggerNotification('Você não tem permissão para excluir este cadastro.', 'error');
+        setRegistrationToDelete(null);
+        return;
+      }
       setRegistrations(registrations.filter(r => r.id !== registrationToDelete.id));
       
       if (isSupabaseConnected) {
@@ -1248,6 +1422,10 @@ export default function App() {
   };
 
   const handleEditRegistrationClick = (reg: Registration) => {
+    if (!profile.isAdmin && reg.leaderId !== profile.id && reg.leaderName !== profile.name && reg.leaderEmail !== profile.email) {
+      triggerNotification('Você só pode editar cadastros feitos por você mesmo.', 'error');
+      return;
+    }
     setEditingRegistration(reg);
     setEditRegName(reg.name);
     setEditRegLeaderId(reg.leaderId);
@@ -1374,13 +1552,32 @@ export default function App() {
       return;
     }
 
+    // Password Checks
+    if (!editingLeader) {
+      if (!newLeaderPassword.trim()) {
+        triggerNotification('Por favor, defina uma senha para este novo usuário.', 'error');
+        return;
+      }
+      if (newLeaderPassword !== newLeaderConfirmPassword) {
+        triggerNotification('As senhas digitadas não batem!', 'error');
+        return;
+      }
+    } else {
+      if (newLeaderPassword && newLeaderPassword !== newLeaderConfirmPassword) {
+        triggerNotification('As senhas digitadas não batem!', 'error');
+        return;
+      }
+    }
+
     if (editingLeader) {
-      const updatedLeader = {
+      const updatedLeader: Leader = {
         ...editingLeader,
         name: newLeaderName,
         email: newLeaderEmail,
         phone: newLeaderPhone,
-        cpf: newLeaderCPF
+        cpf: newLeaderCPF,
+        isAdmin: newLeaderIsAdmin,
+        password: newLeaderPassword || editingLeader.password
       };
       setLeaders(leaders.map(l => l.id === editingLeader.id ? updatedLeader : l));
       
@@ -1395,6 +1592,19 @@ export default function App() {
         for (const reg of regsToUpdate) {
           upsertRegistration(reg).catch(console.error);
         }
+
+        // Also update corresponding user profile to match
+        const defaultProfile: UserProfile = {
+          id: editingLeader.id,
+          name: newLeaderName,
+          email: newLeaderEmail,
+          phone: newLeaderPhone,
+          cpf: newLeaderCPF,
+          avatarUrl: editingLeader.avatarUrl,
+          isAdmin: newLeaderIsAdmin,
+          password: newLeaderPassword || editingLeader.password
+        };
+        upsertProfile(editingLeader.id, defaultProfile).catch(console.error);
       }
 
       triggerNotification(`Informações da liderança "${newLeaderName}" atualizadas!`, 'success');
@@ -1405,15 +1615,30 @@ export default function App() {
         email: newLeaderEmail,
         phone: newLeaderPhone || '(11) 90000-0000',
         cpf: newLeaderCPF,
-        avatarUrl: `https://lh3.googleusercontent.com/aida-public/AB6AXuBqSqcWc2kJo5-jPOAsbeGIb73aG0i_QnKy9b-NmRm3CWjLDJj4hYwyMD3D8hoylJyWJr2TNTScNu6gweCSmnYvCLbCAlhNTQ2BMZE5YnNxIzMvoAZ2P0JNm0DXeAEmRBgegNC_W7C-vKE26uOQpcfSt52h0K4UZnWBTXokjMEBuZyJq8qoHxpEzIjbC78LKdoM5eTOIK9y-kzr0kb3cKL5aD46C_lP1tU9KHX7Uv7ixekHZh-ZryJEIwsri-E3rBGiMVgf5oCpXZOc`,
+        avatarUrl: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=256`,
         registrationCount: 0,
-        status: 'Ativo'
+        status: 'Ativo',
+        isAdmin: newLeaderIsAdmin,
+        password: newLeaderPassword
       };
       setLeaders([...leaders, newLeader]);
 
       // Supabase Sync
       if (isSupabaseConnected) {
         upsertLeader(newLeader).catch(console.error);
+
+        // Also create a profile counterpart in profiles table
+        const defaultProfile: UserProfile = {
+          id: newLeader.id,
+          name: newLeader.name,
+          email: newLeader.email,
+          phone: newLeader.phone,
+          cpf: newLeader.cpf || '',
+          avatarUrl: newLeader.avatarUrl,
+          isAdmin: newLeader.isAdmin,
+          password: newLeader.password
+        };
+        upsertProfile(newLeader.id, defaultProfile).catch(console.error);
       }
 
       triggerNotification(`Nova liderança "${newLeaderName}" criada com sucesso.`, 'success');
@@ -1424,6 +1649,10 @@ export default function App() {
     setNewLeaderEmail('');
     setNewLeaderPhone('');
     setNewLeaderCPF('');
+    setNewLeaderIsAdmin(false);
+    setNewLeaderPassword('');
+    setNewLeaderConfirmPassword('');
+    setShowNewLeaderPassword(false);
     setEditingLeader(null);
     setShowAddLeaderModal(false);
   };
@@ -1434,6 +1663,9 @@ export default function App() {
     setNewLeaderEmail(leader.email);
     setNewLeaderPhone(leader.phone);
     setNewLeaderCPF(leader.cpf || '');
+    setNewLeaderIsAdmin(leader.isAdmin ?? false);
+    setNewLeaderPassword(leader.password || '');
+    setNewLeaderConfirmPassword(leader.password || '');
     setShowAddLeaderModal(true);
   };
 
@@ -1474,8 +1706,29 @@ export default function App() {
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     triggerNotification('Atualizando dados de perfil corporativo...', 'info');
+    const profileId = profile.id || 'p1';
+
+    // Synchronize current leader list to match updated profile name, avatar and details
+    const updatedLeaders = leaders.map(l => {
+      if (l.id === profileId || l.email.trim().toLowerCase() === profile.email.trim().toLowerCase()) {
+        const u = {
+          ...l,
+          name: profile.name,
+          phone: profile.phone,
+          cpf: profile.cpf,
+          avatarUrl: profile.avatarUrl
+        };
+        if (isSupabaseConnected) {
+          upsertLeader(u).catch(console.error);
+        }
+        return u;
+      }
+      return l;
+    });
+    setLeaders(updatedLeaders);
+
     if (isSupabaseConnected) {
-      upsertProfile('p1', profile)
+      upsertProfile(profileId, profile)
         .then(success => {
           if (success) {
             triggerNotification('Perfil corporativo sincronizado no Supabase!', 'success');
@@ -1520,8 +1773,17 @@ export default function App() {
     triggerNotification('Link exclusivo copiado com sucesso!', 'success');
   };
 
+  // Support for role-based restricted access (Liderança vs. Admin)
+  const visibleRegistrations = useMemo(() => {
+    if (isLoggedIn && !profile.isAdmin) {
+      // Leaders can only view registrations made by them
+      return registrations.filter(r => r.leaderId === profile.id || r.leaderName === profile.name || r.leaderEmail === profile.email);
+    }
+    return registrations;
+  }, [registrations, isLoggedIn, profile.isAdmin, profile.id, profile.name, profile.email]);
+
   // Dynamic values based on filters in Reports screen
-  const filteredRegistrations = registrations.filter(r => {
+  const filteredRegistrations = visibleRegistrations.filter(r => {
     const query = searchQuery.toLowerCase().trim();
     const queryMatch = !query || r.name.toLowerCase().includes(query) || r.category.toLowerCase().includes(query) || r.leaderName.toLowerCase().includes(query);
     
@@ -1545,22 +1807,22 @@ export default function App() {
   });
 
   // KPI aggregates
-  const totalCadastrosValue = registrations.length;
+  const totalCadastrosValue = visibleRegistrations.length;
   const activeLeadersCount = leaders.filter(l => l.status === 'Ativo').length;
   const inactiveLeadersCount = leaders.filter(l => l.status === 'Inativo').length;
-  const totalLeadsToday = registrations.filter(r => r.date.toLowerCase().includes('hoje') || r.date.includes(':')).length;
+  const totalLeadsToday = visibleRegistrations.filter(r => r.date.toLowerCase().includes('hoje') || r.date.includes(':')).length;
 
   // Dynamic Month count from registrations
   const totalLeadsThisMonth = useMemo(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
-    return registrations.filter(r => {
+    return visibleRegistrations.filter(r => {
       if (!r.createdAt) return false;
       const d = new Date(r.createdAt);
       return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
     }).length;
-  }, [registrations]);
+  }, [visibleRegistrations]);
 
   // Dynamic filtered month count for report metric
   const filteredLeadsThisMonth = useMemo(() => {
@@ -1903,103 +2165,93 @@ export default function App() {
   };
 
   if (!isLoggedIn) {
-    // Elegant Simplified Login View matching the requested layout design
+    // Elegant login view
     return (
       <div className="flex min-h-screen w-full bg-[#f7f9fb] font-sans">
         {/* Left Side: Solid Indigo branding banner with centred content */}
         <div className="hidden lg:flex lg:w-1/2 bg-[#4d44e3] flex-col justify-center items-center p-12 text-white relative">
           <div className="flex flex-col items-center">
             {/* Elegant group icon box with premium feel */}
-            <div className="w-28 h-28 bg-[#5e55e9] border border-[#6f67ed] rounded-[2rem] flex items-center justify-center shadow-lg mb-6">
+            <div className="w-28 h-28 bg-[#5e55e9] border border-[#6f67ed] rounded-[2rem] flex items-center justify-center shadow-lg mb-6 animate-pulse">
               <Users className="w-14 h-14 text-white" />
             </div>
             
             <h1 className="text-3xl font-bold tracking-tight text-white mb-1.5 text-center">
-              Cadastros
+              Painel de Cadastros
             </h1>
             <p className="text-base text-white/80 text-center font-normal">
-              Ana Carolina Oliveira
+              Ana Carolina Oliveira & Ricardo Ivanov
             </p>
             <div className="h-[1.5px] w-20 bg-white/20 mt-6" />
           </div>
         </div>
 
         {/* Right Side: Simple & beautiful form card on light background */}
-        <div className="w-full lg:w-1/2 flex flex-col justify-center items-center px-6 sm:px-12 md:px-16 bg-[#f7f9fb]">
-          <div className="max-w-[440px] w-full bg-white p-8 sm:p-10 rounded-2xl border border-[#e4e7eb] shadow-[0_10px_30px_rgba(0,0,0,0.03)]">
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold text-[#191c1e] tracking-tight mb-1">Bem-vindo!</h2>
-              <p className="text-sm text-gray-500">Acesse sua conta para continuar</p>
-            </div>
-
-            <form onSubmit={handleLogin} className="space-y-6">
-              {/* E-mail Form Field */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">E-mail</label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
-                    <Mail className="w-5 h-5" />
-                  </span>
-                  <input
-                    type="email"
-                    required
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    className="w-full bg-white text-sm py-3 pl-11 pr-4 rounded-lg outline-none border border-gray-200 focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] text-[#191c1e] transition-all placeholder:text-gray-400"
-                    placeholder="seu@email.com"
-                  />
-                </div>
+        <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-6 sm:p-12 bg-[#f7f9fb]">
+          <div className="max-w-[460px] w-full bg-white p-8 sm:p-10 rounded-2xl border border-[#e4e7eb] shadow-[0_10px_30px_rgba(0,0,0,0.03)] my-8">
+            <div>
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-[#191c1e] tracking-tight mb-1">Bem-vindo!</h2>
+                <p className="text-sm text-gray-500">Acesse sua conta para continuar</p>
               </div>
 
-              {/* Password Form Field */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="block text-xs font-semibold text-gray-700">Senha</label>
-                  <button type="button" className="text-xs text-[#4d44e3] hover:underline font-medium">
-                    Esqueci minha senha
-                  </button>
+              <form onSubmit={handleLogin} className="space-y-6">
+                {/* E-mail Form Field */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">E-mail</label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
+                      <Mail className="w-5 h-5" />
+                    </span>
+                    <input
+                      type="email"
+                      required
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      className="w-full bg-white text-sm py-3 pl-11 pr-4 rounded-lg outline-none border border-gray-200 focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] text-[#191c1e] transition-all placeholder:text-gray-400"
+                      placeholder="seu@email.com"
+                    />
+                  </div>
                 </div>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
-                    <Lock className="w-5 h-5" />
-                  </span>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    className="w-full bg-white text-sm py-3 pl-11 pr-11 rounded-lg outline-none border border-gray-200 focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] text-[#191c1e] transition-all placeholder:text-gray-400"
-                    placeholder="••••••••"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+
+                {/* Password Form Field */}
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="block text-xs font-semibold text-gray-700">Senha</label>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
+                      <Lock className="w-5 h-5" />
+                    </span>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      className="w-full bg-white text-sm py-3 pl-11 pr-11 rounded-lg outline-none border border-gray-200 focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] text-[#191c1e] transition-all placeholder:text-gray-400"
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              {/* Login Submit Button */}
-              <button
-                type="submit"
-                className="w-full py-3.5 bg-[#4d44e3] hover:bg-[#3d34d3] text-white rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer shadow-md shadow-[#4d44e3]/10"
-              >
-                <span>Entrar</span>
-                <LogIn className="w-4 h-4" />
-              </button>
-            </form>
-
-            {/* Support / Administrator Sign Up Contact Link */}
-            <div className="mt-8 pt-6 border-t border-gray-100 text-center">
-              <p className="text-xs text-gray-500">
-                Não tem uma conta?{' '}
-                <span className="text-[#4d44e3] font-semibold cursor-pointer hover:underline">
-                  Fale com o administrador.
-                </span>
-              </p>
+                {/* Login Submit Button */}
+                <button
+                  type="submit"
+                  className="w-full py-3.5 bg-[#4d44e3] hover:bg-[#3d34d3] text-white rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer shadow-md shadow-[#4d44e3]/10"
+                >
+                  <span>Entrar</span>
+                  <LogIn className="w-4 h-4" />
+                </button>
+              </form>
             </div>
+
           </div>
         </div>
         {renderNotificationBanner()}
@@ -2029,9 +2281,9 @@ export default function App() {
           <nav className="p-4 space-y-1">
             {renderSidebarItem('dashboard', 'Dashboard', <LayoutDashboard className="w-4 h-4" />)}
             {renderSidebarItem('cadastros', 'Cadastros Realizados', <Users className="w-4 h-4" />)}
-            {renderSidebarItem('lideranças', 'Gestão de Lideranças', <Layers className="w-4 h-4" />)}
-            {renderSidebarItem('formulário', 'Formulário Dinâmico', <Settings className="w-4 h-4" />)}
-            {renderSidebarItem('relatórios', 'Relatórios & Demografia', <BarChart3 className="w-4 h-4" />)}
+            {profile.isAdmin && renderSidebarItem('lideranças', 'Gestão de Lideranças', <Layers className="w-4 h-4" />)}
+            {profile.isAdmin && renderSidebarItem('formulário', 'Formulário Dinâmico', <Settings className="w-4 h-4" />)}
+            {profile.isAdmin && renderSidebarItem('relatórios', 'Relatórios & Demografia', <BarChart3 className="w-4 h-4" />)}
             {renderSidebarItem('perfil', 'Meu Perfil', <User className="w-4 h-4" />)}
           </nav>
         </div>
@@ -2105,9 +2357,9 @@ export default function App() {
                 <nav className="p-4 space-y-1">
                   {renderSidebarItem('dashboard', 'Dashboard', <LayoutDashboard className="w-4 h-4" />)}
                   {renderSidebarItem('cadastros', 'Cadastros Realizados', <Users className="w-4 h-4" />)}
-                  {renderSidebarItem('lideranças', 'Gestão de Lideranças', <Layers className="w-4 h-4" />)}
-                  {renderSidebarItem('formulário', 'Formulário Dinâmico', <Settings className="w-4 h-4" />)}
-                  {renderSidebarItem('relatórios', 'Relatórios & Demografia', <BarChart3 className="w-4 h-4" />)}
+                  {profile.isAdmin && renderSidebarItem('lideranças', 'Gestão de Lideranças', <Layers className="w-4 h-4" />)}
+                  {profile.isAdmin && renderSidebarItem('formulário', 'Formulário Dinâmico', <Settings className="w-4 h-4" />)}
+                  {profile.isAdmin && renderSidebarItem('relatórios', 'Relatórios & Demografia', <BarChart3 className="w-4 h-4" />)}
                   {renderSidebarItem('perfil', 'Meu Perfil', <User className="w-4 h-4" />)}
                 </nav>
               </div>
@@ -2214,7 +2466,7 @@ export default function App() {
             />
             <div className="hidden sm:block">
               <p className="text-[#191c1e] font-semibold text-xs leading-tight">{profile.name}</p>
-              <p className="text-[#777587] text-[10px] uppercase font-mono tracking-wider leading-none mt-0.5">Administrador</p>
+              <p className="text-[#777587] text-[10px] uppercase font-mono tracking-wider leading-none mt-0.5">{profile.isAdmin ? 'Administrador' : 'Liderança'}</p>
             </div>
           </button>
         </header>
@@ -2228,26 +2480,28 @@ export default function App() {
               {/* Bento Welcome Banner header and counter */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
                 
-                <div className="col-span-2 lg:col-span-3 bg-gradient-to-br from-[#3525cd] via-[#4f46e5] to-[#181445] p-6 rounded-2xl text-white flex flex-col justify-between shadow-lg relative overflow-hidden">
+                <div className={`col-span-2 ${profile.isAdmin ? 'lg:col-span-3' : 'lg:col-span-3'} bg-gradient-to-br from-[#3525cd] via-[#4f46e5] to-[#181445] p-6 rounded-2xl text-white flex flex-col justify-between shadow-lg relative overflow-hidden`}>
                   <div className="relative z-10 max-w-xl">
                     <h2 className="text-3xl font-bold tracking-tight mb-2">Olá, {profile.name}!</h2>
                     <p className="text-[#c4c1fb] text-sm font-light leading-relaxed mb-4">
-                      Seu desempenho este mês superou a média em <strong className="text-white font-semibold">12%</strong>. Todas as ferramentas dinâmicas de fidelização e auditoria estão atualizadas e prontas para uso.
+                      Seu desempenho este mês superou a média em <strong className="text-white font-semibold">12%</strong>. Todas as ferramentas dinâmicas de fidelização e auditoria estão prontas para uso.
                     </p>
                   </div>
                   <div className="relative z-10 flex gap-3 mt-4">
-                    <button 
-                      onClick={() => setActiveView('relatórios')}
-                      className="bg-white text-[#3525cd] hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 shadow transition-colors"
-                    >
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      <span>Ver Relatórios Avançados</span>
-                    </button>
+                    {profile.isAdmin && (
+                      <button 
+                        onClick={() => setActiveView('relatórios')}
+                        className="bg-white text-[#3525cd] hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 shadow transition-colors"
+                      >
+                        <BarChart3 className="w-3.5 h-3.5" />
+                        <span>Ver Relatórios Avançados</span>
+                      </button>
+                    )}
                     <button 
                       onClick={() => setActiveView('cadastros')}
                       className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-colors"
                     >
-                      <span>Visualizar Todos os Cadastros</span>
+                      <span>{profile.isAdmin ? 'Visualizar Todos os Cadastros' : 'Visualizar Meus Cadastros'}</span>
                     </button>
                   </div>
                   {/* Background decoration bubble grid overlay */}
@@ -2259,34 +2513,36 @@ export default function App() {
                     setActiveView('cadastros');
                     setCurrentPage(1);
                   }}
-                  className="bg-white p-4 sm:p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between items-center text-center group hover:border-[#3525cd] hover:shadow-md cursor-pointer transition-all"
+                  className={`bg-white p-4 sm:p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between items-center text-center group hover:border-[#3525cd] hover:shadow-md cursor-pointer transition-all col-span-2 ${profile.isAdmin ? 'lg:col-span-1' : 'lg:col-span-2'}`}
                 >
                   <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#e2dfff] rounded-full flex items-center justify-center text-[#3525cd] group-hover:scale-110 transition-transform mb-2 sm:mb-3">
                     <Users className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
-                  <span className="text-[10px] sm:text-xs font-semibold text-[#464555] uppercase tracking-wider mb-1 line-clamp-1">Total de Cadastros</span>
+                  <span className="text-[10px] sm:text-xs font-semibold text-[#464555] uppercase tracking-wider mb-1 line-clamp-1">{profile.isAdmin ? 'Total de Cadastros' : 'Meus Cadastros'}</span>
                   <span className="text-2xl sm:text-3xl font-bold text-[#191c1e] tracking-tight">{totalCadastrosValue}</span>
                   <span className="text-[10px] sm:text-xs text-[#3525cd] font-bold bg-[#e2dfff] px-2 sm:px-2.5 py-0.5 rounded-full mt-3">
                     +{totalLeadsThisMonth} este mês
                   </span>
                 </div>
 
-                <div 
-                  onClick={() => {
-                    setActiveView('lideranças');
-                    setCurrentPage(1);
-                  }}
-                  className="bg-white p-4 sm:p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between items-center text-center group hover:border-[#3525cd] hover:shadow-md cursor-pointer transition-all"
-                >
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#efeafd] rounded-full flex items-center justify-center text-[#6366f1] group-hover:scale-110 transition-transform mb-2 sm:mb-3">
-                    <Layers className="w-5 h-5 sm:w-6 sm:h-6" />
+                {profile.isAdmin && (
+                  <div 
+                    onClick={() => {
+                      setActiveView('lideranças');
+                      setCurrentPage(1);
+                    }}
+                    className="bg-white p-4 sm:p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between items-center text-center group hover:border-[#3525cd] hover:shadow-md cursor-pointer transition-all col-span-2 lg:col-span-1"
+                  >
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#efeafd] rounded-full flex items-center justify-center text-[#6366f1] group-hover:scale-110 transition-transform mb-2 sm:mb-3">
+                      <Layers className="w-5 h-5 sm:w-6 sm:h-6" />
+                    </div>
+                    <span className="text-[10px] sm:text-xs font-semibold text-[#464555] uppercase tracking-wider mb-1 line-clamp-1">Lideranças Cadastradas</span>
+                    <span className="text-2xl sm:text-3xl font-bold text-[#191c1e] tracking-tight">{leaders.length}</span>
+                    <span className="text-[10px] sm:text-xs text-[#6366f1] font-bold bg-[#efeafd] px-2 sm:px-2.5 py-0.5 rounded-full mt-3">
+                      Gerenciar Lideranças
+                    </span>
                   </div>
-                  <span className="text-[10px] sm:text-xs font-semibold text-[#464555] uppercase tracking-wider mb-1 line-clamp-1">Lideranças Cadastradas</span>
-                  <span className="text-2xl sm:text-3xl font-bold text-[#191c1e] tracking-tight">{leaders.length}</span>
-                  <span className="text-[10px] sm:text-xs text-[#6366f1] font-bold bg-[#efeafd] px-2 sm:px-2.5 py-0.5 rounded-full mt-3">
-                    Gerenciar Lideranças
-                  </span>
-                </div>
+                )}
               </div>
 
               {/* divulgation and performance columns */}
@@ -3133,7 +3389,7 @@ export default function App() {
           )}
 
           {/* ANALYTICAL REPORTS VIEW SCREEN */}
-          {activeView === 'relatórios' && (
+          {activeView === 'relatórios' && profile.isAdmin && (
             <div className="space-y-8 animate-fade-in text-left">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#eceef0] pb-6">
                 <div>
@@ -3673,35 +3929,45 @@ export default function App() {
                     <img 
                       src={profile.avatarUrl} 
                       alt="Profile Avatar" 
-                      className="w-28 h-28 rounded-2xl object-cover border-4 border-white shadow-md"
+                      className="w-28 h-28 rounded-2xl object-cover border-4 border-white shadow-md cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => fileInputRef.current?.click()}
                     />
                     <button 
-                      onClick={() => {
-                        triggerNotification('Simulação: Upload de avatar completado!', 'success');
-                      }}
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
                       className="absolute bottom-1 right-1 bg-[#3525cd] text-white p-2 rounded-lg hover:scale-105 active:scale-95 transition-transform shrink-0 shadow"
                     >
                       <Plus className="w-3.5 h-3.5" />
                     </button>
+                    <input 
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleAvatarChange}
+                      accept="image/png, image/jpeg, image/jpg, image/webp"
+                      className="hidden"
+                    />
                   </div>
                   
                   <div className="flex-grow pb-2 text-center md:text-left">
                     <h2 className="text-2xl font-bold text-[#191c1e] leading-tight">{profile.name}</h2>
                     <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mt-1 text-xs text-[#777587]">
-                      <span className="bg-[#f2f4f6] text-[#3323cc] font-bold px-2.5 py-1 rounded">Administrador Master</span>
-                      <span>• São Paulo, Brasil</span>
+                      <span className="bg-[#f2f4f6] text-[#3323cc] font-bold px-2.5 py-1 rounded">
+                        {profile.isAdmin ? 'Administrador' : 'Liderança'}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex gap-2 pb-2">
-                    <button 
-                      onClick={() => handleExport('PDF')}
-                      className="border border-[#c7c4d8] text-[#191c1e] hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-transform active:scale-95"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Baixar Relatório de Atividade</span>
-                    </button>
-                  </div>
+                  {profile.isAdmin && (
+                    <div className="flex gap-2 pb-2">
+                      <button 
+                        onClick={() => handleExport('PDF')}
+                        className="border border-[#c7c4d8] text-[#191c1e] hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-transform active:scale-95"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Baixar Relatório de Atividade</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -3882,9 +4148,10 @@ export default function App() {
                 <select 
                   value={newRegistrationLeader}
                   onChange={(e) => setNewRegistrationLeader(e.target.value)}
-                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
+                  disabled={!profile.isAdmin}
+                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e] disabled:opacity-75 disabled:cursor-not-allowed"
                 >
-                  {leaders.map(l => (
+                  {leaders.filter(l => profile.isAdmin || l.id === profile.id || l.email === profile.email).map(l => (
                     <option key={l.id} value={l.id}>{l.name} ({l.email})</option>
                   ))}
                 </select>
@@ -4258,6 +4525,55 @@ export default function App() {
                   className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none focus:bg-white transition-all font-mono"
                   placeholder="Ex: 000.000.000-00"
                   maxLength={14}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Nível de Permissão (Tipo de Usuário)</label>
+                <select 
+                  value={newLeaderIsAdmin ? 'true' : 'false'}
+                  onChange={(e) => setNewLeaderIsAdmin(e.target.value === 'true')}
+                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
+                >
+                  <option value="false">Liderança (Acesso restrito ao próprio escopo)</option>
+                  <option value="true">Administrador (Acesso total)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">
+                  Senha {editingLeader && <span className="text-gray-400 font-normal lowercase">(Deixe em branco para não alterar)</span>}
+                </label>
+                <div className="relative">
+                  <input 
+                    type={showNewLeaderPassword ? 'text' : 'password'}
+                    required={!editingLeader}
+                    value={newLeaderPassword}
+                    onChange={(e) => setNewLeaderPassword(e.target.value)}
+                    className="w-full bg-[#f2f4f6] text-xs py-2.5 pl-3 pr-10 rounded-lg border border-[#eceef0] outline-none"
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewLeaderPassword(!showNewLeaderPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                  >
+                    {showNewLeaderPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">
+                  Confirmar Senha
+                </label>
+                <input 
+                  type={showNewLeaderPassword ? 'text' : 'password'}
+                  required={!editingLeader || !!newLeaderPassword}
+                  value={newLeaderConfirmPassword}
+                  onChange={(e) => setNewLeaderConfirmPassword(e.target.value)}
+                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none"
+                  placeholder="••••••••"
                 />
               </div>
 
