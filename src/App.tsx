@@ -128,7 +128,7 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
 
   // Password Recovery / Reset States
-  const [authMode, setAuthMode] = useState<'login' | 'forgot' | 'reset'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'forgot' | 'reset' | 'forgot_success'>('login');
   const [forgotEmail, setForgotEmail] = useState('');
   const [resetPasswordEmail, setResetPasswordEmail] = useState('');
   const [resetPasswordToken, setResetPasswordToken] = useState('');
@@ -623,14 +623,59 @@ export default function App() {
     // Generate link with token & email payload
     const resetLink = `${window.location.protocol}//${window.location.host}?reset_email=${encodeURIComponent(emailLower)}&reset_token=token_${Math.random().toString(36).substr(2, 9)}`;
 
-    setMockEmailInbox({
-      to: emailLower,
-      subject: 'Recuperação de Senha - Central Administrativa de Lideranças',
-      body: `Olá, ${userName}!\n\nRecebemos uma solicitação para redefinir a senha da sua conta de acesso ao Painel de Cadastros.\n\nClique no botão abaixo para definir uma nova senha:`,
-      link: resetLink
-    });
+    try {
+      triggerNotification('Enviando e-mail de recuperação...', 'info');
+      const response = await fetch('/api/send-recovery-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: emailLower,
+          name: userName,
+          resetLink: resetLink
+        })
+      });
 
-    triggerNotification('Simulação de e-mail de recuperação gerada com sucesso!', 'success');
+      const resData = await response.json();
+
+      if (resData.success) {
+        if (resData.method === 'smtp') {
+          triggerNotification('Instruções enviadas com sucesso para o seu e-mail corporativo!', 'success');
+          setMockEmailInbox(null); // Real email sent, no need for locally emulated inbox popup to clutter UI
+        } else if (resData.method === 'ethereal') {
+          triggerNotification('Demonstração: E-mail de teste gerado no Ethereal Sandbox!', 'success');
+          setMockEmailInbox({
+            to: emailLower,
+            subject: 'Recuperação de Senha - Central Administrativa (Ethereal Sandbox)',
+            body: `Olá, ${userName}!\n\nSeu servidor em preview utilizou a conta sandbox temporária do Ethereal Mail para transmitir esta mensagem.\n\nPara ver a caixa de entrada simulada de produção real e ler as instruções com o botão funcional de redefinição, clique no link abaixo:\n\n${resData.testUrl}\n\nSe preferir realizar testes de integração direta do fluxo sem sair do navegador, você também pode utilizar o botão abaixo como atalho rápido de testes:`,
+            link: resetLink
+          });
+        } else {
+          // console connection
+          triggerNotification('Servidor sem conexão: Link gerado no terminal do servidor.', 'info');
+          setMockEmailInbox({
+            to: emailLower,
+            subject: 'Recuperação de Senha - Log de Terminal',
+            body: `Olá, ${userName}!\n\nComo o servidor não possui credenciais SMTP ou está sem rede, o link foi impresso no terminal de desenvolvimento.\n\nVocê pode testar o fluxo de recuperação facilmente utilizando o botão abaixo:`,
+            link: resetLink
+          });
+        }
+        setAuthMode('forgot_success');
+      } else {
+        throw new Error(resData.error || 'Erro na resposta do servidor.');
+      }
+    } catch (apiErr: any) {
+      console.warn('API /api/send-recovery-email failed, using elegant frontend fail-safe simulation:', apiErr);
+      setMockEmailInbox({
+        to: emailLower,
+        subject: 'Recuperação de Senha - Central Administrativa de Lideranças',
+        body: `Olá, ${userName}!\n\nRecebemos uma solicitação para redefinir a senha da sua conta de acesso ao Painel de Cadastros.\n\nClique no botão abaixo para definir uma nova senha:`,
+        link: resetLink
+      });
+      triggerNotification('Simulação local gerada com sucesso!', 'success');
+      setAuthMode('forgot_success');
+    }
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -2982,7 +3027,7 @@ export default function App() {
 
               {authMode === 'forgot' && (
                 <>
-                  <div className="mb-8">
+                  <div className="mb-8 font-sans">
                     <h2 className="text-2xl font-bold text-[#191c1e] tracking-tight mb-1">Recuperar Senha</h2>
                     <p className="text-sm text-gray-500">Informe seu e-mail corporativo cadastrado para receber o link de recuperação de senha.</p>
                   </div>
@@ -3025,6 +3070,44 @@ export default function App() {
                     </div>
                   </form>
                 </>
+              )}
+
+              {authMode === 'forgot_success' && (
+                <div className="text-center space-y-6 font-sans">
+                  <div className="w-16 h-16 bg-[#efeafd] text-[#4d44e3] rounded-full flex items-center justify-center mx-auto mb-2">
+                    <Mail className="w-8 h-8" />
+                  </div>
+
+                  <div>
+                    <h2 className="text-2xl font-bold text-[#191c1e] tracking-tight mb-2">Instruções enviadas!</h2>
+                    <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
+                      Se o e-mail informado estiver cadastrado no sistema, enviamos um link para você redefinir sua senha com segurança.
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-4 leading-relaxed bg-[#f8fafc] p-3 rounded-lg border border-gray-100">
+                      Caso não receba em instantes, certifique-se de preencher o endereço correto e confira sua <strong>caixa de Spam</strong> ou <strong>Lixo Eletrônico</strong>.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 pt-2">
+                    <button
+                      onClick={() => {
+                        setAuthMode('login');
+                        setForgotEmail('');
+                      }}
+                      className="w-full py-3.5 bg-[#4d44e3] hover:bg-[#3d34d3] text-white rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-[#4d44e3]/10"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Voltar para a Tela de Login</span>
+                    </button>
+
+                    <button
+                      onClick={() => setAuthMode('forgot')}
+                      className="text-xs font-semibold text-[#4d44e3] hover:underline transition-colors block mx-auto"
+                    >
+                      Tentar com outro endereço de e-mail
+                    </button>
+                  </div>
+                </div>
               )}
 
               {authMode === 'reset' && (
