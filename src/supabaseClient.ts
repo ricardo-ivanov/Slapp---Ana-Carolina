@@ -91,7 +91,7 @@ export async function fetchProfile(profileId: string = 'p1'): Promise<UserProfil
       cpf: data.cpf || '',
       avatarUrl: decoded.cleanUrl,
       isAdmin: checkIfEmailIsAdmin(data.email),
-      password: decoded.password
+      password: data.password || decoded.password
     };
   } catch (err) {
     console.error('Error fetching profile from Supabase:', err);
@@ -118,7 +118,7 @@ export async function fetchProfileByEmail(email: string): Promise<UserProfile | 
       cpf: data.cpf || '',
       avatarUrl: decoded.cleanUrl,
       isAdmin: checkIfEmailIsAdmin(data.email),
-      password: decoded.password
+      password: data.password || decoded.password
     };
   } catch (err) {
     console.error('Error fetching profile by email from Supabase:', err);
@@ -130,17 +130,30 @@ export async function upsertProfile(profileId: string, profile: UserProfile): Pr
   if (!supabase) return false;
   try {
     const encodedAvatar = encodePasswordInAvatar(profile.avatarUrl, profile.password);
+    const payload: any = {
+      id: profileId,
+      name: profile.name,
+      email: profile.email,
+      phone: profile.phone,
+      cpf: profile.cpf,
+      avatar_url: encodedAvatar,
+      password: profile.password || ''
+    };
     const { error } = await supabase
       .from('profiles')
-      .upsert({
-        id: profileId,
-        name: profile.name,
-        email: profile.email,
-        phone: profile.phone,
-        cpf: profile.cpf,
-        avatar_url: encodedAvatar
-      });
-    if (error) throw error;
+      .upsert(payload);
+    if (error) {
+      if (error.message && (error.message.includes('column') || error.message.includes('relation'))) {
+        console.warn('Supabase profile table password column fallback triggered:', error.message);
+        delete payload.password;
+        const { error: retryError } = await supabase
+          .from('profiles')
+          .upsert(payload);
+        if (retryError) throw retryError;
+      } else {
+        throw error;
+      }
+    }
     return true;
   } catch (err) {
     console.error('Error upserting profile in Supabase:', err);
@@ -171,7 +184,7 @@ export async function fetchLeaders(): Promise<Leader[] | null> {
         registrationCount: item.registration_count || 0,
         status: item.status || 'Ativo',
         isAdmin: checkIfEmailIsAdmin(item.email),
-        password: decoded.password
+        password: item.password || decoded.password
       };
     });
   } catch (err) {
@@ -184,19 +197,32 @@ export async function upsertLeader(leader: Leader): Promise<boolean> {
   if (!supabase) return false;
   try {
     const encodedAvatar = encodePasswordInAvatar(leader.avatarUrl, leader.password);
+    const payload: any = {
+      id: leader.id,
+      name: leader.name,
+      email: leader.email,
+      phone: leader.phone,
+      cpf: leader.cpf,
+      avatar_url: encodedAvatar,
+      registration_count: leader.registrationCount,
+      status: leader.status,
+      password: leader.password || ''
+    };
     const { error } = await supabase
       .from('leaders')
-      .upsert({
-        id: leader.id,
-        name: leader.name,
-        email: leader.email,
-        phone: leader.phone,
-        cpf: leader.cpf,
-        avatar_url: encodedAvatar,
-        registration_count: leader.registrationCount,
-        status: leader.status
-      });
-    if (error) throw error;
+      .upsert(payload);
+    if (error) {
+      if (error.message && (error.message.includes('column') || error.message.includes('relation'))) {
+        console.warn('Supabase leaders table password column fallback triggered:', error.message);
+        delete payload.password;
+        const { error: retryError } = await supabase
+          .from('leaders')
+          .upsert(payload);
+        if (retryError) throw retryError;
+      } else {
+        throw error;
+      }
+    }
     return true;
   } catch (err) {
     console.error('Error saving leader to Supabase:', err);

@@ -318,9 +318,9 @@ export default function App() {
         setIsPublicRoute(true);
         setNewRegistrationLeader(matched.id);
       } else {
-        // Shown as generic public registration with dropdown selection
+        // Unmatched custom slugs should fallback to the admin panel/login view
         setPublicFormLeader(null);
-        setIsPublicRoute(true);
+        setIsPublicRoute(false);
       }
     };
 
@@ -342,32 +342,102 @@ export default function App() {
 
       if (connected) {
         try {
-          // 1. Fetch Profile
+          // Define default admin profiles with passwords
+          const defaultAdmin1: UserProfile = {
+            id: 'p1',
+            name: 'Ana Carolina Oliveira',
+            email: 'ana.carolina@lideranca.com',
+            phone: '(11) 98765-4321',
+            cpf: '123.456.789-00',
+            avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
+          const defaultAdmin2: UserProfile = {
+            id: 'p_ricardo',
+            name: 'Ricardo Ivanov',
+            email: 'contato@ricardoivanov.com.br',
+            phone: '(11) 99999-9999',
+            cpf: '000.000.000-00',
+            avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=256',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
+          // 1. Seed profiles to Supabase if they are missing
+          const p1Db = await fetchProfile('p1');
+          if (!p1Db) {
+            await upsertProfile('p1', defaultAdmin1);
+          }
+          const pRDb = await fetchProfile('p_ricardo');
+          if (!pRDb) {
+            await upsertProfile('p_ricardo', defaultAdmin2);
+          }
+
+          // Update active profile if logged in
           if (isLoggedIn && profile?.email) {
             const dbProfile = await fetchProfileByEmail(profile.email);
             if (dbProfile) {
               setProfile(dbProfile);
-            } else {
-              const pfId = profile.id || ('leader_' + Date.now());
-              await upsertProfile(pfId, profile);
-            }
-          } else {
-            const dbProfile = await fetchProfile('p1');
-            if (!dbProfile) {
-              await upsertProfile('p1', INITIAL_PROFILE);
             }
           }
 
-          // 2. Fetch Leaders
+          // 2. Fetch/Seed Leaders (including administrators representing leadership links)
+          const adminLeader1: Leader = {
+            id: 'p1',
+            name: 'Ana Carolina Oliveira',
+            email: 'ana.carolina@lideranca.com',
+            phone: '(11) 98765-4321',
+            cpf: '123.456.789-00',
+            avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
+            registrationCount: 0,
+            status: 'Ativo',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
+          const adminLeader2: Leader = {
+            id: 'p_ricardo',
+            name: 'Ricardo Ivanov',
+            email: 'contato@ricardoivanov.com.br',
+            phone: '(11) 99999-9999',
+            cpf: '000.000.000-00',
+            avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=256',
+            registrationCount: 0,
+            status: 'Ativo',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
           const dbLeaders = await fetchLeaders();
-          if (dbLeaders && dbLeaders.length > 0) {
-            setLeaders(dbLeaders);
-          } else {
-            for (const leader of INITIAL_LEADERS) {
-              await upsertLeader(leader);
-            }
-            setLeaders(INITIAL_LEADERS);
+          let mergedList: Leader[] = dbLeaders || [];
+
+          // Ensure admins are present and seeded in leaders
+          if (!mergedList.some(l => l.email === adminLeader1.email)) {
+            await upsertLeader(adminLeader1);
+            mergedList.push(adminLeader1);
           }
+          if (!mergedList.some(l => l.email === adminLeader2.email)) {
+            await upsertLeader(adminLeader2);
+            mergedList.push(adminLeader2);
+          }
+
+          // Ensure default leaders are present and seeded
+          if (!dbLeaders || dbLeaders.length === 0) {
+            for (const leader of INITIAL_LEADERS) {
+              if (!mergedList.some(l => l.email === leader.email)) {
+                await upsertLeader(leader);
+                mergedList.push(leader);
+              }
+            }
+          }
+
+          // Deduplicate and set leaders state
+          const uniqueMap = new Map<string, Leader>();
+          mergedList.forEach(l => uniqueMap.set(l.id, l));
+          const finalLeaders = Array.from(uniqueMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+          setLeaders(finalLeaders);
 
           // 3. Fetch Registrations
           const dbRegs = await fetchRegistrations();
@@ -482,19 +552,21 @@ export default function App() {
     triggerNotification('Verificando credenciais...', 'info');
 
     // 1. Try to fetch profile from Supabase by email
-    let existingProfile: UserProfile | null = null;
+    let dbProfile: UserProfile | null = null;
     if (isSupabaseConnected) {
-      existingProfile = await fetchProfileByEmail(emailLower);
+      dbProfile = await fetchProfileByEmail(emailLower);
     }
 
-    if (existingProfile) {
-      if (existingProfile.password && existingProfile.password !== loginPassword) {
+    if (dbProfile) {
+      // Direct password verification
+      const dbPassword = dbProfile.password || 'admin123'; // Seed fallback
+      if (dbPassword !== loginPassword) {
         triggerNotification('Senha incorreta! Por favor, tente novamente.', 'error');
         return;
       }
       const isAdminRole = checkIfEmailIsAdmin(emailLower);
       const userProfile: UserProfile = {
-        ...existingProfile,
+        ...dbProfile,
         isAdmin: isAdminRole
       };
       setProfile(userProfile);
@@ -504,8 +576,44 @@ export default function App() {
       return;
     }
 
-    // 2. Default administrator fallback if offline or not in DB yet
-    if (emailLower === 'ana.carolina@lideranca.com') {
+    // 2. Fetch / Check among leaders array inside state (which also contains admins in db)
+    const matchingLeader = leaders.find(l => l.email.trim().toLowerCase() === emailLower);
+    if (matchingLeader) {
+      if (matchingLeader.status === 'Inativo') {
+        triggerNotification('Esta conta de liderança está inativa. Entre em contato com o administrador.', 'error');
+        return;
+      }
+      
+      const dbPassword = matchingLeader.password || 'lider123'; // Seed fallback
+      if (dbPassword !== loginPassword) {
+        triggerNotification('Senha incorreta! Por favor, tente novamente.', 'error');
+        return;
+      }
+      
+      const isLeaderAdmin = checkIfEmailIsAdmin(emailLower);
+      const leaderProfile: UserProfile = {
+        id: matchingLeader.id,
+        name: matchingLeader.name,
+        email: matchingLeader.email,
+        phone: matchingLeader.phone,
+        cpf: matchingLeader.cpf || '',
+        avatarUrl: matchingLeader.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256',
+        isAdmin: isLeaderAdmin,
+        password: matchingLeader.password || 'lider123'
+      };
+      setProfile(leaderProfile);
+      setIsLoggedIn(true);
+      setActiveView('dashboard');
+      
+      if (isSupabaseConnected) {
+        await upsertProfile(matchingLeader.id, leaderProfile);
+      }
+      triggerNotification(`Acesso concedido como ${isLeaderAdmin ? 'Administrador' : 'Liderança'}. Olá, ${matchingLeader.name}!`, 'success');
+      return;
+    }
+
+    // 3. Fallback check for offline/unseeded first-time run
+    if (emailLower === 'ana.carolina@lideranca.com' && loginPassword === 'admin123') {
       const adminProfile: UserProfile = {
         id: 'p1',
         name: 'Ana Carolina Oliveira',
@@ -513,7 +621,8 @@ export default function App() {
         phone: '(11) 98765-4321',
         cpf: '123.456.789-00',
         avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
-        isAdmin: true
+        isAdmin: true,
+        password: 'admin123'
       };
       setProfile(adminProfile);
       setIsLoggedIn(true);
@@ -525,8 +634,7 @@ export default function App() {
       return;
     }
 
-    // Default admin check for ricardo
-    if (emailLower === 'contato@ricardoivanov.com.br') {
+    if (emailLower === 'contato@ricardoivanov.com.br' && loginPassword === 'admin123') {
       const adminProfile: UserProfile = {
         id: 'p_ricardo',
         name: 'Ricardo Ivanov',
@@ -534,7 +642,8 @@ export default function App() {
         phone: '(11) 99999-9999',
         cpf: '000.000.000-00',
         avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=256',
-        isAdmin: true
+        isAdmin: true,
+        password: 'admin123'
       };
       setProfile(adminProfile);
       setIsLoggedIn(true);
@@ -546,39 +655,7 @@ export default function App() {
       return;
     }
 
-    // 3. Fallback matching existing leaders table
-    const matchingLeader = leaders.find(l => l.email.trim().toLowerCase() === emailLower);
-    if (matchingLeader) {
-      if (matchingLeader.status === 'Inativo') {
-        triggerNotification('Esta conta de liderança está inativa. Entre em contato com o administrador.', 'error');
-        return;
-      }
-      if (matchingLeader.password && matchingLeader.password !== loginPassword) {
-        triggerNotification('Senha incorreta! Por favor, tente novamente.', 'error');
-        return;
-      }
-      const isLeaderAdmin = checkIfEmailIsAdmin(emailLower);
-      const leaderProfile: UserProfile = {
-        id: matchingLeader.id,
-        name: matchingLeader.name,
-        email: matchingLeader.email,
-        phone: matchingLeader.phone,
-        cpf: matchingLeader.cpf || '',
-        avatarUrl: matchingLeader.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256',
-        isAdmin: isLeaderAdmin,
-        password: matchingLeader.password
-      };
-      setProfile(leaderProfile);
-      setIsLoggedIn(true);
-      setActiveView('dashboard');
-      if (isSupabaseConnected) {
-        await upsertProfile(matchingLeader.id, leaderProfile);
-      }
-      triggerNotification(`Acesso concedido como ${isLeaderAdmin ? 'Administrador' : 'Liderança'}. Olá, ${matchingLeader.name}!`, 'success');
-      return;
-    }
-
-    // 4. Default: User not found
+    // 4. Default: User not found or incorrect credentials
     triggerNotification('Credenciais inválidas ou e-mail não cadastrado. Caso necessite de acesso, entre em contato com o administrador.', 'error');
   };
 
@@ -677,13 +754,28 @@ export default function App() {
   const submitNewRegistration = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate CPF fields
+    // Validate CPF fields and block duplicate entries
     const cpfFields = formFields.filter(f => f.type === 'cpf');
     for (const field of cpfFields) {
       const val = dynamicFormInput[field.id];
       if (field.required || (val && val.trim() !== '')) {
         if (!val || !validateCPF(val)) {
           triggerNotification(`O campo "${field.label}" possui um CPF inválido!`, 'error');
+          return;
+        }
+
+        // Normalize CPF and check duplicates
+        const normalizedInputCpf = val.replace(/\D/g, '');
+        const isDuplicate = registrations.some(r => {
+          const registeredVal = r[field.id] || r['f2'];
+          if (typeof registeredVal === 'string') {
+            return registeredVal.replace(/\D/g, '') === normalizedInputCpf;
+          }
+          return false;
+        });
+
+        if (isDuplicate) {
+          triggerNotification(`Um cadastro com este CPF informado no campo "${field.label}" já está registrado no sistema!`, 'error');
           return;
         }
       }
@@ -799,7 +891,7 @@ export default function App() {
       htmlContent += `<table>`;
       
       // Document Metadata Headings
-      htmlContent += `<tr><td colspan="${headers.length}" class="title" style="border:none;">Relatório de Cadastros - Ana Carolina</td></tr>`;
+      htmlContent += `<tr><td colspan="${headers.length}" class="title" style="border:none;">Relatório de Cadastros - Ana Carolina Oliveira</td></tr>`;
       htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Data do Relatório: <b>${formattedDate}</b></td></tr>`;
       htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Total Geral de Cadastros: <span class="metric">${totalCount}</span></td></tr>`;
       htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Total de Cadastros Filtrados: <span class="metric">${filteredCount}</span></td></tr>`;
@@ -839,7 +931,7 @@ export default function App() {
       
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Relatório de Cadastros - Ana Carolina ${formattedDate}.xls`;
+      link.download = `Relatório de Cadastros - Ana Carolina Oliveira ${formattedDate}.xls`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -867,7 +959,7 @@ export default function App() {
         }).join('  |  ');
 
       // CSV needs semicolon as field separator for Excel compatibility in Portuguese
-      let csvContent = `Relatório de Cadastros - Ana Carolina\r\n`;
+      let csvContent = `Relatório de Cadastros - Ana Carolina Oliveira\r\n`;
       csvContent += `Data do Relatório;${formattedDate}\r\n`;
       csvContent += `Total Geral de Cadastros;${totalCount}\r\n`;
       csvContent += `Total de Cadastros Filtrados;${filteredCount}\r\n`;
@@ -885,7 +977,7 @@ export default function App() {
       
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `Relatório de Cadastros - Ana Carolina ${formattedDate}.csv`;
+      link.download = `Relatório de Cadastros - Ana Carolina Oliveira ${formattedDate}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1274,7 +1366,7 @@ export default function App() {
               <tr>
                 <td style="padding: 25px; text-align: left; vertical-align: middle;">
                   <h1 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px; text-transform: uppercase; color: #ffffff; font-family: Arial, sans-serif; line-height: 1.2;">Relatório Consolidado de Cadastros</h1>
-                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #94a3b8; font-weight: 500; font-family: Arial, sans-serif; line-height: 1.2;">Ana Carolina • Central de Relatórios de Campo</p>
+                  <p style="margin: 4px 0 0 0; font-size: 11px; color: #94a3b8; font-weight: 500; font-family: Arial, sans-serif; line-height: 1.2;">Ana Carolina Oliveira • Central de Relatórios de Campo</p>
                 </td>
                 <td style="width: 150px; padding: 25px; text-align: right; vertical-align: middle;">
                   <div style="font-size: 10px; font-weight: 700; color: #a5b4fc; text-transform: uppercase; letter-spacing: 0.5px; font-family: Arial, sans-serif; line-height: 1.2;">Emissão</div>
@@ -1324,7 +1416,7 @@ export default function App() {
 
           <table style="width: 100%; border-collapse: collapse; border-top: 1px solid #f1f5f9; padding-top: 15px; table-layout: fixed; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;">
             <tr>
-              <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: left;">Ana Carolina • Central Administrativa de Lideranças</td>
+              <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: left;">Ana Carolina Oliveira • Central Administrativa de Lideranças</td>
               <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: right;">Página 1 de 3</td>
             </tr>
           </table>
@@ -1362,7 +1454,7 @@ export default function App() {
 
           <table style="width: 100%; border-collapse: collapse; border-top: 1px solid #f1f5f9; padding-top: 15px; table-layout: fixed; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;">
             <tr>
-              <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: left;">Ana Carolina • Central Administrativa de Lideranças</td>
+              <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: left;">Ana Carolina Oliveira • Central Administrativa de Lideranças</td>
               <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: right;">Página 2 de 3</td>
             </tr>
           </table>
@@ -1390,7 +1482,7 @@ export default function App() {
 
           <table style="width: 100%; border-collapse: collapse; border-top: 1px solid #f1f5f9; padding-top: 15px; table-layout: fixed; box-sizing: border-box; font-family: Arial, Helvetica, sans-serif;">
             <tr>
-              <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: left;">Ana Carolina • Central Administrativa de Lideranças</td>
+              <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: left;">Ana Carolina Oliveira • Central Administrativa de Lideranças</td>
               <td style="padding-top: 15px; font-size: 10px; color: #94a3b8; font-weight: 600; text-align: right;">Página 3 de 3</td>
             </tr>
           </table>
@@ -1436,7 +1528,7 @@ export default function App() {
           pdf.addImage(p3Img, 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
 
           // Save PDF with correct pattern
-          pdf.save(`Relatório de Cadastros - Ana Carolina ${formattedDate}.pdf`);
+          pdf.save(`Relatório de Cadastros - Ana Carolina Oliveira ${formattedDate}.pdf`);
           triggerNotification(`Relatório PDF exportado com sucesso!`, 'success');
         } else {
           throw new Error('Elements not found in PDF compiler.');
@@ -2214,13 +2306,28 @@ export default function App() {
   const submitPublicRegistration = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate CPF fields
+    // Validate CPF fields and block duplicate entries
     const cpfFields = formFields.filter(f => f.type === 'cpf');
     for (const field of cpfFields) {
       const val = dynamicFormInput[field.id];
       if (field.required || (val && val.trim() !== '')) {
         if (!val || !validateCPF(val)) {
           triggerNotification(`O campo "${field.label}" possui um CPF inválido!`, 'error');
+          return;
+        }
+
+        // Normalize CPF and check duplicates
+        const normalizedInputCpf = val.replace(/\D/g, '');
+        const isDuplicate = registrations.some(r => {
+          const registeredVal = r[field.id] || r['f2'];
+          if (typeof registeredVal === 'string') {
+            return registeredVal.replace(/\D/g, '') === normalizedInputCpf;
+          }
+          return false;
+        });
+
+        if (isDuplicate) {
+          triggerNotification(`Já existe um cadastro ativo com o CPF informado no campo "${field.label}"!`, 'error');
           return;
         }
       }
@@ -2525,7 +2632,7 @@ export default function App() {
               Painel de Cadastros
             </h1>
             <p className="text-base text-white/80 text-center font-normal">
-              Ana Carolina Oliveira & Ricardo Ivanov
+              Ana Carolina Oliveira
             </p>
             <div className="h-[1.5px] w-20 bg-white/20 mt-6" />
           </div>
@@ -3444,6 +3551,7 @@ export default function App() {
                       <tr>
                         <th className="px-6 py-4 border-b border-[#eceef0]">Liderança</th>
                         <th className="px-6 py-4 border-b border-[#eceef0]">E-mail Corporativo</th>
+                        <th className="px-6 py-4 border-b border-[#eceef0]">Nível de Usuário</th>
                         <th className="px-6 py-4 border-b border-[#eceef0]">Status</th>
                         <th className="px-6 py-4 border-b border-[#eceef0] text-right">Ações</th>
                       </tr>
@@ -3468,6 +3576,15 @@ export default function App() {
                                   <span className="text-[#777587] font-mono text-[10px]">CPF: {leader.cpf}</span>
                                 )}
                               </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                                leader.isAdmin 
+                                  ? 'bg-[#efeafd] text-[#6366f1] border-[#dcd3fc]' 
+                                  : 'bg-[#e2dfff] text-[#3525cd] border-[#cecbfa]'
+                              }`}>
+                                {leader.isAdmin ? 'Administrador' : 'Liderança'}
+                              </span>
                             </td>
                             <td className="px-6 py-4">
                               <button 

@@ -6,6 +6,7 @@ export const INITIAL_PROFILE: UserProfile = {
   phone: '(11) 98765-4321',
   cpf: '123.456.789-00',
   avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
+  password: 'admin123',
 };
 
 export const INITIAL_LEADERS: Leader[] = [
@@ -17,6 +18,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 156,
     status: 'Ativo',
     phone: '(11) 97123-4567',
+    password: 'lider123',
   },
   {
     id: 'l2',
@@ -26,6 +28,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 1420,
     status: 'Ativo',
     phone: '(11) 98223-4455',
+    password: 'lider123',
   },
   {
     id: 'l3',
@@ -35,6 +38,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 185,
     status: 'Ativo',
     phone: '(11) 96554-3321',
+    password: 'lider123',
   },
   {
     id: 'l4',
@@ -44,6 +48,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 982,
     status: 'Ativo',
     phone: '(21) 98888-7766',
+    password: 'lider123',
   },
   {
     id: 'l5',
@@ -53,6 +58,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 112,
     status: 'Ativo',
     phone: '(11) 97766-1122',
+    password: 'lider123',
   },
   {
     id: 'l6',
@@ -62,6 +68,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 98,
     status: 'Ativo',
     phone: '(11) 96554-1100',
+    password: 'lider123',
   },
   {
     id: 'l7',
@@ -71,6 +78,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 45,
     status: 'Inativo',
     phone: '(11) 97722-0099',
+    password: 'lider123',
   },
   {
     id: 'l8',
@@ -80,6 +88,7 @@ export const INITIAL_LEADERS: Leader[] = [
     registrationCount: 2890,
     status: 'Ativo',
     phone: '(19) 99345-6677',
+    password: 'lider123',
   }
 ];
 
