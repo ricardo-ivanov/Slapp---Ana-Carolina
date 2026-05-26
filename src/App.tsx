@@ -642,13 +642,18 @@ export default function App() {
       if (resData.success) {
         if (resData.method === 'smtp') {
           triggerNotification('Instruções enviadas com sucesso para o seu e-mail corporativo!', 'success');
-          setMockEmailInbox(null); // Real email sent, no need for locally emulated inbox popup to clutter UI
+          setMockEmailInbox({
+            to: emailLower,
+            subject: 'Recuperação de Senha - Central Administrativa',
+            body: '',
+            link: resetLink
+          });
         } else if (resData.method === 'ethereal') {
           triggerNotification('Demonstração: E-mail de teste gerado no Ethereal Sandbox!', 'success');
           setMockEmailInbox({
             to: emailLower,
             subject: 'Recuperação de Senha - Central Administrativa (Ethereal Sandbox)',
-            body: `Olá, ${userName}!\n\nSeu servidor em preview utilizou a conta sandbox temporária do Ethereal Mail para transmitir esta mensagem.\n\nPara ver a caixa de entrada simulada de produção real e ler as instruções com o botão funcional de redefinição, clique no link abaixo:\n\n${resData.testUrl}\n\nSe preferir realizar testes de integração direta do fluxo sem sair do navegador, você também pode utilizar o botão abaixo como atalho rápido de testes:`,
+            body: `Olá, ${userName}!\n\nSeu servidor em preview utilizou a conta sandbox temporária do Ethereal Mail para transmitir esta mensagem.`,
             link: resetLink
           });
         } else {
@@ -657,7 +662,7 @@ export default function App() {
           setMockEmailInbox({
             to: emailLower,
             subject: 'Recuperação de Senha - Log de Terminal',
-            body: `Olá, ${userName}!\n\nComo o servidor não possui credenciais SMTP ou está sem rede, o link foi impresso no terminal de desenvolvimento.\n\nVocê pode testar o fluxo de recuperação facilmente utilizando o botão abaixo:`,
+            body: `Olá, ${userName}!`,
             link: resetLink
           });
         }
@@ -2864,63 +2869,49 @@ export default function App() {
       if (!mockEmailInbox) return null;
       return (
         <div className="fixed inset-0 bg-[#0f172a]/60 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-2xl max-w-lg w-full overflow-hidden text-left animate-fade-in animate-scale-up">
-            {/* Header */}
-            <div className="bg-[#1e293b] p-5 text-white flex justify-between items-center bg-gradient-to-r from-[#1e293b] to-[#334155]">
-              <div className="flex items-center gap-3">
-                <div className="bg-[#4d44e3]/20 p-2 rounded-xl text-indigo-400">
-                  <Mail className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm leading-tight text-white">Simulador de E-mail de Recuperação</h3>
-                  <p className="text-[10px] text-gray-400 font-mono">Simulação de recebimento em tempo real</p>
-                </div>
-              </div>
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-2xl max-w-md w-full overflow-hidden text-center p-8 animate-fade-in animate-scale-up">
+            {/* Visual Icon */}
+            <div className="w-16 h-16 bg-[#efeafd] text-[#4d44e3] rounded-full flex items-center justify-center mx-auto mb-6">
+              <Mail className="w-8 h-8" />
+            </div>
+
+            {/* Modal Title */}
+            <h3 className="text-xl font-bold text-[#191c1e] mb-3 font-sans">
+              E-mail de Recuperação Enviado!
+            </h3>
+
+            {/* Informational Message */}
+            <p className="text-sm text-gray-500 leading-relaxed mb-4 font-sans">
+              As instruções e o link seguro de redefinição de senha foram enviados para o seguinte endereço de e-mail:
+            </p>
+
+            <div className="bg-[#f0f2f5] py-2.5 px-4 rounded-xl border border-gray-150 inline-block font-medium text-gray-800 text-sm mb-6 max-w-full truncate font-mono select-all">
+              {mockEmailInbox.to}
+            </div>
+
+            {/* Help guidelines */}
+            <div className="text-xs text-gray-400 leading-relaxed bg-[#f8fafc] p-4 rounded-xl border border-gray-100 text-left mb-6 font-sans">
+              <span className="font-bold text-gray-500 block mb-1">Dicas úteis:</span>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>Verifique sua <strong>Caixa de Entrada</strong>.</li>
+                <li>Confira a pasta de <strong>Spam</strong> ou <strong>Lixo Eletrônico</strong>.</li>
+                <li>O link de redefinição expira por motivos de segurança após o uso.</li>
+              </ul>
+            </div>
+
+            {/* Return to Login Action Button */}
+            <div className="space-y-4">
               <button 
-                onClick={() => setMockEmailInbox(null)}
-                className="text-gray-400 hover:text-white transition-colors p-1.5 hover:bg-white/10 rounded-lg"
+                onClick={() => {
+                  setMockEmailInbox(null);
+                  setAuthMode('login');
+                  triggerNotification('Retornando ao portal de login.', 'info');
+                }}
+                className="w-full py-3.5 bg-[#4d44e3] hover:bg-[#3d34d3] text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-[#4d44e3]/20 flex items-center justify-center gap-2 cursor-pointer hover:scale-[1.01]"
               >
-                <X className="w-5 h-5" />
+                <ChevronLeft className="w-4 h-4" />
+                <span>Voltar para o Login</span>
               </button>
-            </div>
-
-            {/* Email Headers */}
-            <div className="p-4 border-b border-gray-100 bg-[#f8fafc] text-xs space-y-2">
-              <div><span className="font-semibold text-gray-500">De:</span> <span className="font-semibold text-[#4d44e3]">suporte-sistema@admincore.com.br</span></div>
-              <div><span className="font-semibold text-gray-500">Para:</span> <span className="font-mono text-gray-800 font-semibold">{mockEmailInbox.to}</span></div>
-              <div><span className="font-semibold text-gray-500">Assunto:</span> <span className="font-semibold text-gray-800">{mockEmailInbox.subject}</span></div>
-            </div>
-
-            {/* Email Body */}
-            <div className="p-6 text-sm text-gray-650 space-y-6">
-              <p className="whitespace-pre-line leading-relaxed">{mockEmailInbox.body}</p>
-
-              <div className="py-4 text-center">
-                <button 
-                  onClick={() => {
-                    // Navigate directly by updating SPA states without reload
-                    const params = new URLSearchParams(mockEmailInbox.link.split('?')[1]);
-                    const resetEmailParam = params.get('reset_email');
-                    const resetTokenParam = params.get('reset_token');
-                    if (resetEmailParam && resetTokenParam) {
-                      setResetPasswordEmail(resetEmailParam);
-                      setResetPasswordToken(resetTokenParam);
-                      setAuthMode('reset');
-                    }
-                    setMockEmailInbox(null);
-                    triggerNotification('Link de recuperação acessado com sucesso!', 'success');
-                  }}
-                  className="inline-flex items-center gap-2.5 px-6 py-3 bg-[#4d44e3] hover:bg-[#3d34d3] text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-[#4d44e3]/20 hover:scale-[1.02] cursor-pointer"
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>Redefinir Minha Senha</span>
-                </button>
-              </div>
-
-              <div className="text-[10px] text-gray-400 border-t border-gray-100 pt-4 font-mono select-all break-all bg-gray-50 p-3 rounded-lg">
-                <span className="font-bold block text-gray-500 mb-1">Link de uso interno para testes (se quiser colar no navegador):</span>
-                {mockEmailInbox.link}
-              </div>
             </div>
           </div>
         </div>

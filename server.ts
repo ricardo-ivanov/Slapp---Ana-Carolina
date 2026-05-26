@@ -29,9 +29,11 @@ async function startServer() {
     const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
     const smtpUser = process.env.SMTP_USER;
     const smtpPass = process.env.SMTP_PASS;
-    const smtpFrom = process.env.SMTP_FROM || "suporte-sistema@admincore.com.br";
+    const smtpFrom = process.env.SMTP_FROM || smtpUser || "suporte-sistema@admincore.com.br";
+    const displayName = smtpFrom.includes('@') ? smtpFrom.split('@')[0] : "Suporte";
 
     console.log(`[SMTP Recovery Flow] Initiated for: ${email}`);
+    console.log(`[SMTP Diagnostics] Host: "${smtpHost}", Port: ${smtpPort}, User: "${smtpUser}", From: "${smtpFrom}", Pass Configured: ${smtpPass ? "Yes" : "No"}`);
 
     // Clean HTML email template matching the system's professional aesthetic
     const emailHtml = `
@@ -161,22 +163,29 @@ async function startServer() {
     // Attempt to send using configured SMTP details
     if (smtpHost && smtpUser) {
       try {
-        console.log(`[SMTP Recovery Flow] Using user configured SMTP server: ${smtpHost}:${smtpPort}`);
+        console.log(`[SMTP Recovery Flow] Initiated transport verification for: ${smtpHost}:${smtpPort}`);
         const transporter = nodemailer.createTransport({
           host: smtpHost,
           port: smtpPort,
-          secure: smtpPort === 465, // True for 465, false for others
+          secure: smtpPort === 465, // True for 465, false for 587 and others
           auth: {
             user: smtpUser,
             pass: smtpPass
           },
           tls: {
             rejectUnauthorized: false
-          }
+          },
+          connectionTimeout: 10000, // 10 seconds timeout
+          greetingTimeout: 10000,   // 10 seconds timeout
+          socketTimeout: 15000       // 15 seconds socket timeout
         });
 
+        // Test the connection before sending
+        await transporter.verify();
+        console.log("[SMTP Recovery Flow] Connection successfully verified with SMTP mail relay!");
+
         const info = await transporter.sendMail({
-          from: `"${smtpFrom.split('@')[0]}" <${smtpFrom}>`,
+          from: `"${displayName}" <${smtpFrom}>`,
           to: email,
           subject: "Recuperação de Senha - Central Administrativa",
           html: emailHtml
@@ -190,10 +199,10 @@ async function startServer() {
           messageId: info.messageId 
         });
       } catch (smtpErr: any) {
-        console.error("[SMTP Recovery Flow] Error sending via SMTP:", smtpErr);
+        console.error("[SMTP Recovery Flow] Connection/Send via SMTP failed in node server:", smtpErr);
         return res.status(500).json({ 
           success: false, 
-          error: `Erro ao enviar e-mail via SMTP do servidor: ${smtpErr.message || smtpErr}` 
+          error: `Erro de conexão SMTP no servidor (${smtpHost}): ${smtpErr.message || smtpErr}` 
         });
       }
     }
@@ -213,7 +222,7 @@ async function startServer() {
       });
 
       const info = await transporter.sendMail({
-        from: `"${smtpFrom.split('@')[0]}" <${smtpFrom}>`,
+        from: `"${displayName}" <${smtpFrom}>`,
         to: email,
         subject: "Recuperação de Senha - Central Administrativa (Ambiente de Testes)",
         html: emailHtml
