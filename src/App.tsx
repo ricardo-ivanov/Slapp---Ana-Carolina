@@ -200,6 +200,28 @@ export default function App() {
     }
   }, [filterStartDate, filterEndDate]);
 
+  // Helper to generate dynamic clean slugs matching exactly "https://url-do-site/nome-usuario"
+  const getLeaderSlug = (name: string): string => {
+    return name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  };
+
+  const getLeaderLink = (name: string): string => {
+    const origin = window.location.origin;
+    return `${origin}/${getLeaderSlug(name)}`;
+  };
+
+  // Public user registration route states
+  const [isPublicRoute, setIsPublicRoute] = useState(false);
+  const [publicFormLeader, setPublicFormLeader] = useState<Leader | null>(null);
+  const [isPublicRegistrationSubmitted, setIsPublicRegistrationSubmitted] = useState(false);
+
   // New Registration Form inputs (constructed dynamically using dynamic fields)
   const [dynamicFormInput, setDynamicFormInput] = useState<Record<string, string>>({});
   const [newRegistrationCategory, setNewRegistrationCategory] = useState(CATEGORIES_LIST[0]);
@@ -257,6 +279,55 @@ export default function App() {
       }
     }
   }, [activeView, isLoggedIn, profile.isAdmin]);
+
+  // Handle Dynamic Link / Public Registration Route Interceptor
+  useEffect(() => {
+    const handleUrlRouting = () => {
+      let path = window.location.pathname.replace(/^\//, '').trim();
+      if (path) {
+        path = path.split('?')[0].split('#')[0];
+      }
+
+      const reservedPaths = ['', 'login', 'dashboard', 'cadastros', 'lideranças', 'relatórios', 'perfil'];
+      if (!path || reservedPaths.includes(path.toLowerCase())) {
+        // Look for query fallback URL (safe fallback in some Sandboxes)
+        const params = new URLSearchParams(window.location.search);
+        const qLeader = params.get('leader') || params.get('lider');
+        if (qLeader) {
+          const matched = leaders.find(l => getLeaderSlug(l.name) === getLeaderSlug(qLeader) || l.name.toLowerCase() === qLeader.toLowerCase());
+          if (matched) {
+            setPublicFormLeader(matched);
+            setIsPublicRoute(true);
+            return;
+          }
+        }
+        setIsPublicRoute(false);
+        setPublicFormLeader(null);
+        return;
+      }
+
+      try {
+        path = decodeURIComponent(path);
+      } catch (e) {}
+
+      const cleanSlug = getLeaderSlug(path);
+      const matched = leaders.find(l => getLeaderSlug(l.name) === cleanSlug);
+
+      if (matched) {
+        setPublicFormLeader(matched);
+        setIsPublicRoute(true);
+        setNewRegistrationLeader(matched.id);
+      } else {
+        // Shown as generic public registration with dropdown selection
+        setPublicFormLeader(null);
+        setIsPublicRoute(true);
+      }
+    };
+
+    handleUrlRouting();
+    window.addEventListener('popstate', handleUrlRouting);
+    return () => window.removeEventListener('popstate', handleUrlRouting);
+  }, [leaders]);
 
   // Supabase Database Connection & Seeding effect
   useEffect(() => {
@@ -1507,9 +1578,7 @@ export default function App() {
     }
   };
 
-  const currentLeaderLink = profile.name === 'Ana Carolina Oliveira' || profile.name === 'Ana Carolina'
-    ? 'cadastros.com/ana-carolina-lider'
-    : `cadastros.com/${profile.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-')}-lider`;
+  const currentLeaderLink = getLeaderLink(profile.name);
 
   const handleDownloadPersonalQR = async (text: string, filename: string) => {
     try {
@@ -2142,6 +2211,278 @@ export default function App() {
     );
   };
 
+  const submitPublicRegistration = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Validate CPF fields
+    const cpfFields = formFields.filter(f => f.type === 'cpf');
+    for (const field of cpfFields) {
+      const val = dynamicFormInput[field.id];
+      if (field.required || (val && val.trim() !== '')) {
+        if (!val || !validateCPF(val)) {
+          triggerNotification(`O campo "${field.label}" possui um CPF inválido!`, 'error');
+          return;
+        }
+      }
+    }
+
+    // Determine target leader ID and name
+    const selectedLeaderId = publicFormLeader ? publicFormLeader.id : newRegistrationLeader;
+    if (!selectedLeaderId) {
+      triggerNotification('Por favor, selecione uma Liderança de Campo Responsável.', 'error');
+      return;
+    }
+
+    const selectedLeaderObj = leaders.find(l => l.id === selectedLeaderId);
+    if (!selectedLeaderObj) {
+      triggerNotification('Liderança responsável não encontrada.', 'error');
+      return;
+    }
+
+    // Primary field: 'Nome Completo'
+    const nameField = formFields.find(f => f.id === 'f1') || formFields[0];
+    const nameValue = dynamicFormInput[nameField?.id] || dynamicFormInput['f1'] || 'Membro Anônimo';
+
+    const newReg: Registration = {
+      id: 'reg_' + Date.now(),
+      name: nameValue,
+      category: newRegistrationCategory,
+      leaderId: selectedLeaderObj.id,
+      leaderName: selectedLeaderObj.name,
+      date: 'Hoje, ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date().toISOString(),
+      ...dynamicFormInput
+    };
+
+    // Increment leader registrations count
+    const updatedLeaders = leaders.map(l => l.id === selectedLeaderObj.id ? { ...l, registrationCount: l.registrationCount + 1 } : l);
+    setLeaders(updatedLeaders);
+    setRegistrations([newReg, ...registrations]);
+
+    // Supabase DB Sync
+    if (isSupabaseConnected) {
+      upsertRegistration(newReg).catch(console.error);
+      const updatedLeaderObj = updatedLeaders.find(l => l.id === selectedLeaderObj.id);
+      if (updatedLeaderObj) {
+        upsertLeader(updatedLeaderObj).catch(console.error);
+      }
+    }
+
+    // Clear dynamic inputs
+    setDynamicFormInput({});
+    setIsPublicRegistrationSubmitted(true);
+    triggerNotification(`Cadastro de "${nameValue}" realizado com sucesso!`, 'success');
+  };
+
+  const renderPublicRegistrationView = () => {
+    if (isPublicRegistrationSubmitted) {
+      return (
+        <div className="flex min-h-screen w-full bg-[#f7f9fb] font-sans items-center justify-center p-4">
+          <div className="max-w-[480px] w-full bg-white p-8 sm:p-10 rounded-2xl border border-[#e4e7eb] shadow-[0_10px_30px_rgba(0,0,0,0.03)] text-center space-y-6 animate-fade-in">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
+              <Check className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-[#191c1e] tracking-tight mb-2 font-sans">Cadastro Confirmado!</h2>
+              <p className="text-sm text-gray-500 leading-relaxed font-sans">
+                Sua ficha cadastral foi enviada com sucesso para o banco de dados corporativo sob o controle de{' '}
+                <strong className="text-gray-900 font-semibold">
+                  {publicFormLeader ? publicFormLeader.name : 'Liderança de Campo'}
+                </strong>.
+              </p>
+            </div>
+            
+            <div className="h-[1px] bg-gray-100 my-4" />
+            
+            <div className="flex flex-col gap-3 font-sans">
+              <button
+                type="button"
+                onClick={() => {
+                  setDynamicFormInput({});
+                  setIsPublicRegistrationSubmitted(false);
+                }}
+                className="w-full py-3 bg-[#443cdf] hover:bg-[#342cb2] text-white rounded-lg font-bold text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#443cdf]/50 cursor-pointer shadow-md"
+              >
+                Preencher Novo Cadastro
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPublicRoute(false);
+                  window.history.pushState({}, '', '/');
+                }}
+                className="w-full py-2.5 bg-gray-50 hover:bg-gray-100 text-gray-600 border border-gray-200 rounded-lg font-semibold text-xs transition-all focus:outline-none cursor-pointer"
+              >
+                Voltar à Área de Login
+              </button>
+            </div>
+          </div>
+          {renderNotificationBanner()}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex min-h-screen w-full bg-[#f7f9fb] font-sans items-center justify-center p-4 sm:p-6 md:p-8 relative">
+        <div className="absolute top-4 right-4 z-50">
+          <button
+            type="button"
+            onClick={() => {
+              setIsPublicRoute(false);
+              window.history.pushState({}, '', '/');
+            }}
+            className="text-xs bg-white text-gray-600 border border-[#e4e7eb] px-3.5 py-2 rounded-xl font-bold shadow-sm hover:bg-gray-50 flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>Área Administrativa</span>
+          </button>
+        </div>
+
+        <div className="max-w-[540px] w-full bg-white rounded-3xl border border-[#e4e7eb] shadow-[0_15px_40px_rgba(0,0,0,0.04)] overflow-hidden my-4 sm:my-8 animate-fade-in shadow-2xl relative">
+          <div className="p-6 bg-[#4d44e3] text-white text-center space-y-2 relative overflow-hidden">
+            <div className="absolute -top-12 -left-12 w-32 h-32 bg-white/5 rounded-full blur-2xl" />
+            <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-white/5 rounded-full blur-2xl" />
+            
+            <div className="inline-flex w-12 h-12 bg-white/10 rounded-2xl items-center justify-center mb-1">
+              <Users className="w-6 h-6 text-white" />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight">Formulário de Cadastro Oficial</h1>
+            <p className="text-xs text-white/70">Preencha os dados abaixo com atenção para ingressar no sistema.</p>
+          </div>
+
+          <form onSubmit={submitPublicRegistration} className="p-6 sm:p-8 space-y-6">
+            
+            <div className="bg-gray-50 border border-gray-100 p-4 rounded-2xl flex items-center gap-3.5">
+              {publicFormLeader ? (
+                <>
+                  <img 
+                    src={publicFormLeader.avatarUrl} 
+                    alt={publicFormLeader.name} 
+                    className="w-12 h-12 rounded-full object-cover border-2 border-[#4d44e3]" 
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[10px] font-bold text-[#4d44e3] uppercase tracking-wider block">Liderança de Referência</span>
+                    <h3 className="font-bold text-sm text-gray-900 truncate">{publicFormLeader.name}</h3>
+                    <p className="text-xs text-gray-500 truncate">{publicFormLeader.email}</p>
+                  </div>
+                  <span className="bg-[#e0e7ff] text-[#4d44e3] text-[9px] font-bold px-2 py-0.5 rounded-full border border-[#4d44e3]/10 uppercase shrink-0">
+                    Ativo
+                  </span>
+                </>
+              ) : (
+                <div className="w-full space-y-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <LockOpen className="w-4 h-4 text-[#4d44e3]" />
+                    <span className="text-xs font-bold text-[#4d44e3] uppercase tracking-wider">Selecione o Líder de Campo de seu Atendimento</span>
+                  </div>
+                  
+                  <select 
+                    required
+                    value={newRegistrationLeader}
+                    onChange={(e) => setNewRegistrationLeader(e.target.value)}
+                    className="w-full bg-white text-xs py-2.5 px-3 rounded-lg border border-gray-200 outline-none font-semibold text-[#191c1e] focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3]"
+                  >
+                    <option value="">Selecione quem é o seu líder responsável...</option>
+                    {leaders.filter(l => l.status === 'Ativo').map(l => (
+                      <option key={l.id} value={l.id}>{l.name} ({l.email})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
+                Categoria de Atendimento <span className="text-red-500">*</span>
+              </label>
+              <select 
+                required
+                value={newRegistrationCategory}
+                onChange={(e) => setNewRegistrationCategory(e.target.value)}
+                className="w-full bg-gray-50 text-xs py-3 px-4 rounded-lg border border-gray-200 outline-none font-semibold text-gray-800 focus:bg-white focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] transition-colors"
+              >
+                {CATEGORIES_LIST.map((cat, idx) => (
+                  <option key={idx} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="h-[1px] bg-gray-100 my-4" />
+
+            <div className="space-y-4">
+              {formFields.map((field) => {
+                if (field.type === 'h2') {
+                  return (
+                    <h4 key={field.id} className="text-xs font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5 pt-3 text-gray-800 font-sans">
+                      {field.label}
+                    </h4>
+                  );
+                }
+                if (field.type === 'p') {
+                  return (
+                    <p key={field.id} className="text-[11px] text-gray-500 leading-normal font-sans">
+                      {field.label}
+                    </p>
+                  );
+                }
+
+                return (
+                  <div key={field.id} className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-gray-700">
+                      {field.label} {field.required && <span className="text-red-500">*</span>}
+                    </label>
+                    {field.type === 'select' ? (
+                      <select 
+                        required={field.required}
+                        value={dynamicFormInput[field.id] || ''}
+                        onChange={(e) => setDynamicFormInput({...dynamicFormInput, [field.id]: e.target.value})}
+                        className="w-full bg-gray-50 text-xs py-2.5 px-4 rounded-lg border border-gray-200 outline-none focus:bg-white focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] transition-colors text-gray-800"
+                      >
+                        <option value="">Selecione uma opção...</option>
+                        {field.options?.map((opt, i) => (
+                          <option key={i} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input 
+                        type={field.type === 'email' ? 'email' : 'text'}
+                        required={field.required}
+                        maxLength={field.type === 'cpf' ? 14 : field.type === 'tel' ? 15 : undefined}
+                        placeholder={field.placeholder || ''}
+                        value={dynamicFormInput[field.id] || ''}
+                        onChange={(e) => {
+                          let value = e.target.value;
+                          if (field.type === 'cpf') {
+                            value = maskCPF(value);
+                          } else if (field.type === 'tel') {
+                            value = maskPhone(value);
+                          }
+                          setDynamicFormInput({...dynamicFormInput, [field.id]: value});
+                        }}
+                        className="w-full bg-gray-50 text-xs py-2.5 px-4 rounded-lg border border-gray-200 outline-none focus:bg-white focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] transition-colors text-gray-800"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full py-3.5 bg-[#4d44e3] hover:bg-[#3d34d3] text-white rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer shadow-lg shadow-[#4d44e3]/20"
+            >
+              <span>Enviar Formulário</span>
+              <Check className="w-4 h-4" />
+            </button>
+
+          </form>
+        </div>
+        {renderNotificationBanner()}
+      </div>
+    );
+  };
+
   // Renders Sidebar Navigation Row
   const renderSidebarItem = (view: ActiveView, label: string, icon: React.ReactNode) => {
     const isActive = activeView === view;
@@ -2163,6 +2504,10 @@ export default function App() {
       </button>
     );
   };
+
+  if (isPublicRoute) {
+    return renderPublicRegistrationView();
+  }
 
   if (!isLoggedIn) {
     // Elegant login view
@@ -4602,7 +4947,7 @@ export default function App() {
 
       {/* Leader's specialized QR view modal overlay */}
       {viewingLeaderQR && (() => {
-        const leaderCollectionLink = `cadastros.com/${viewingLeaderQR.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '-')}`;
+        const leaderCollectionLink = getLeaderLink(viewingLeaderQR.name);
         return (
           <div className="fixed inset-0 bg-[#181445]/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl border border-[#eceef0] shadow-lg max-w-sm w-full overflow-hidden text-center animate-fade-in">
