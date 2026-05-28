@@ -58,7 +58,10 @@ import {
   deleteRegistrationFromDB,
   fetchFormFields,
   upsertFormField,
-  deleteFormFieldFromDB
+  deleteFormFieldFromDB,
+  fetchCategoriesFromDB,
+  upsertCategoryInDB,
+  deleteCategoryFromDB
 } from './supabaseClient';
 import {
   INITIAL_PROFILE,
@@ -517,6 +520,17 @@ export default function App() {
             }
             setFormFields(INITIAL_FORM_FIELDS);
           }
+
+          // 5. Fetch Categories
+          const dbCategories = await fetchCategoriesFromDB();
+          if (dbCategories && dbCategories.length > 0) {
+            setCategoriesList(dbCategories);
+          } else {
+            for (let i = 0; i < CATEGORIES_LIST.length; i++) {
+              await upsertCategoryInDB(`c_${i}_${Date.now()}`, CATEGORIES_LIST[i]);
+            }
+            setCategoriesList(CATEGORIES_LIST);
+          }
         } catch (error) {
           console.error('Failed to pre-seed/fetch database:', error);
           triggerNotification('Conectado ao servidor, mas ocorreu um erro ao carregar as tabelas.', 'error');
@@ -532,7 +546,7 @@ export default function App() {
 
   // Form Fields DB Synchronization Hook
   useEffect(() => {
-    if (!isSupabaseConnected || isLoadingFromSupabase) return;
+    if (!isSupabaseConnected || isLoadingFromSupabase || !isLoggedIn || !profile.isAdmin) return;
     const syncFields = async () => {
       try {
         const dbFields = await fetchFormFields();
@@ -552,7 +566,32 @@ export default function App() {
       }
     };
     syncFields();
-  }, [formFields, isSupabaseConnected, isLoadingFromSupabase]);
+  }, [formFields, isSupabaseConnected, isLoadingFromSupabase, isLoggedIn, profile.isAdmin]);
+
+  // Categories DB Synchronization Hook
+  useEffect(() => {
+    if (!isSupabaseConnected || isLoadingFromSupabase || !isLoggedIn || !profile.isAdmin) return;
+    const syncCategories = async () => {
+      try {
+        const dbCategories = await fetchCategoriesFromDB();
+        if (dbCategories) {
+          for (const dbCat of dbCategories) {
+            if (!categoriesList.includes(dbCat)) {
+              await deleteCategoryFromDB(dbCat);
+            }
+          }
+        }
+        for (let i = 0; i < categoriesList.length; i++) {
+          const catName = categoriesList[i];
+          const catId = `cat_sync_${encodeURIComponent(catName)}`;
+          await upsertCategoryInDB(catId, catName);
+        }
+      } catch (err) {
+        console.error('Failed to sync categories to Supabase:', err);
+      }
+    };
+    syncCategories();
+  }, [categoriesList, isSupabaseConnected, isLoadingFromSupabase, isLoggedIn, profile.isAdmin]);
 
   // Trigger brief alert banners
   const triggerNotification = (message: string, type: 'success' | 'info' | 'error' | 'warning' = 'success') => {
@@ -4318,7 +4357,7 @@ export default function App() {
                           ) : (
                             <>
                               <span className="text-xs font-semibold text-[#191c1e] pl-1">{cat}</span>
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center gap-1">
                                 <button 
                                   onClick={() => handleStartEditCategory(index, cat)}
                                   className="p-1 hover:bg-[#e2dfff]/40 text-[#3525cd] rounded transition-colors"

@@ -390,3 +390,58 @@ export async function deleteFormFieldFromDB(id: string): Promise<boolean> {
     return false;
   }
 }
+
+// ==========================================
+// CATEGORIES API HELPERS
+// ==========================================
+export async function fetchCategoriesFromDB(): Promise<string[] | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('name')
+      .order('created_at', { ascending: true });
+    
+    if (error) {
+      if (error.message && (error.message.includes('relation') || error.message.includes('does not exist'))) {
+        console.warn('Supabase categories table not found, fallback to localStorage.');
+        return null;
+      }
+      throw error;
+    }
+    return data.map((item: any) => item.name);
+  } catch (err) {
+    console.warn('Error fetching categories from Supabase:', err);
+    return null;
+  }
+}
+
+export async function upsertCategoryInDB(id: string, name: string): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase
+      .from('categories')
+      .upsert({ id, name });
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error('Error upserting category in Supabase:', err);
+    return false;
+  }
+}
+
+export async function deleteCategoryFromDB(name: string): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase
+      .from('categories')
+      .delete()
+      .eq('name', name);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error('Error deleting category from Supabase:', err);
+    return false;
+  }
+}
+
