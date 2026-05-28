@@ -60,7 +60,8 @@ import {
   upsertFormField,
   deleteFormFieldFromDB,
   fetchCategoriesFromDB,
-  syncCategoriesInDB
+  syncCategoriesInDB,
+  supabase
 } from './supabaseClient';
 import {
   INITIAL_PROFILE,

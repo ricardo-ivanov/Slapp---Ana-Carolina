@@ -489,8 +489,7 @@ export async function syncCategoriesInDB(categories: string[]): Promise<boolean>
           list: categories, 
           updated_at: new Date().toISOString() 
         })
-        .then(() => {})
-        .catch(() => {});
+        .then(() => {}, () => {});
 
       return true;
     }
