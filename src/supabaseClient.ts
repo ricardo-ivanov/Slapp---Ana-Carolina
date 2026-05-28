@@ -50,24 +50,38 @@ export function checkIfEmailIsAdmin(email: string): boolean {
 }
 
 // ==========================================
-// PASSWORD ENCODING IN AVATAR HELPER
+// PASSWORD AND ROLE ENCODING IN AVATAR HELPER
 // ==========================================
-export function encodePasswordInAvatar(avatarUrl: string, password?: string): string {
-  if (!password) return avatarUrl || '';
-  const cleanUrl = (avatarUrl || '').split('#pwd:')[0];
-  return `${cleanUrl}#pwd:${encodeURIComponent(password)}`;
+export function encodePasswordInAvatar(avatarUrl: string, password?: string, isAdmin?: boolean): string {
+  const cleanUrl = (avatarUrl || '').split('#pwd:')[0].split('#meta:')[0];
+  const meta = { password: password || '', isAdmin: !!isAdmin };
+  return `${cleanUrl}#meta:${encodeURIComponent(JSON.stringify(meta))}`;
 }
 
-export function decodePasswordFromAvatar(avatarUrl: string): { cleanUrl: string; password?: string } {
+export function decodePasswordFromAvatar(avatarUrl: string): { cleanUrl: string; password?: string; isAdmin?: boolean } {
   const url = avatarUrl || '';
+  if (url.includes('#meta:')) {
+    const parts = url.split('#meta:');
+    try {
+      const parsed = JSON.parse(decodeURIComponent(parts[1]));
+      return {
+        cleanUrl: parts[0],
+        password: parsed.password || undefined,
+        isAdmin: parsed.isAdmin !== undefined ? parsed.isAdmin : undefined
+      };
+    } catch (e) {
+      return { cleanUrl: parts[0] };
+    }
+  }
   if (url.includes('#pwd:')) {
     const parts = url.split('#pwd:');
     return {
       cleanUrl: parts[0],
-      password: decodeURIComponent(parts[1])
+      password: decodeURIComponent(parts[1]),
+      isAdmin: undefined
     };
   }
-  return { cleanUrl: url, password: undefined };
+  return { cleanUrl: url, password: undefined, isAdmin: undefined };
 }
 
 // ==========================================
@@ -90,7 +104,7 @@ export async function fetchProfile(profileId: string = 'p1'): Promise<UserProfil
       phone: data.phone || '',
       cpf: data.cpf || '',
       avatarUrl: decoded.cleanUrl,
-      isAdmin: checkIfEmailIsAdmin(data.email),
+      isAdmin: data.is_admin !== undefined ? data.is_admin : (decoded.isAdmin !== undefined ? decoded.isAdmin : checkIfEmailIsAdmin(data.email)),
       password: data.password || decoded.password
     };
   } catch (err) {
@@ -117,7 +131,7 @@ export async function fetchProfileByEmail(email: string): Promise<UserProfile | 
       phone: data.phone || '',
       cpf: data.cpf || '',
       avatarUrl: decoded.cleanUrl,
-      isAdmin: checkIfEmailIsAdmin(data.email),
+      isAdmin: data.is_admin !== undefined ? data.is_admin : (decoded.isAdmin !== undefined ? decoded.isAdmin : checkIfEmailIsAdmin(data.email)),
       password: data.password || decoded.password
     };
   } catch (err) {
@@ -129,7 +143,7 @@ export async function fetchProfileByEmail(email: string): Promise<UserProfile | 
 export async function upsertProfile(profileId: string, profile: UserProfile): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const encodedAvatar = encodePasswordInAvatar(profile.avatarUrl, profile.password);
+    const encodedAvatar = encodePasswordInAvatar(profile.avatarUrl, profile.password, profile.isAdmin);
     const payload: any = {
       id: profileId,
       name: profile.name,
@@ -137,6 +151,7 @@ export async function upsertProfile(profileId: string, profile: UserProfile): Pr
       phone: profile.phone,
       cpf: profile.cpf,
       avatar_url: encodedAvatar,
+      is_admin: profile.isAdmin,
       password: profile.password || ''
     };
     const { error } = await supabase
@@ -144,8 +159,9 @@ export async function upsertProfile(profileId: string, profile: UserProfile): Pr
       .upsert(payload);
     if (error) {
       if (error.message && (error.message.includes('column') || error.message.includes('relation'))) {
-        console.warn('Supabase profile table password column fallback triggered:', error.message);
+        console.warn('Supabase profile table fallback triggered:', error.message);
         delete payload.password;
+        delete payload.is_admin;
         const { error: retryError } = await supabase
           .from('profiles')
           .upsert(payload);
@@ -183,7 +199,7 @@ export async function fetchLeaders(): Promise<Leader[] | null> {
         avatarUrl: decoded.cleanUrl,
         registrationCount: item.registration_count || 0,
         status: item.status || 'Ativo',
-        isAdmin: checkIfEmailIsAdmin(item.email),
+        isAdmin: item.is_admin !== undefined ? item.is_admin : (decoded.isAdmin !== undefined ? decoded.isAdmin : checkIfEmailIsAdmin(item.email)),
         password: item.password || decoded.password
       };
     });
@@ -196,7 +212,7 @@ export async function fetchLeaders(): Promise<Leader[] | null> {
 export async function upsertLeader(leader: Leader): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const encodedAvatar = encodePasswordInAvatar(leader.avatarUrl, leader.password);
+    const encodedAvatar = encodePasswordInAvatar(leader.avatarUrl, leader.password, leader.isAdmin);
     const payload: any = {
       id: leader.id,
       name: leader.name,
@@ -206,6 +222,7 @@ export async function upsertLeader(leader: Leader): Promise<boolean> {
       avatar_url: encodedAvatar,
       registration_count: leader.registrationCount,
       status: leader.status,
+      is_admin: leader.isAdmin,
       password: leader.password || ''
     };
     const { error } = await supabase
@@ -213,8 +230,9 @@ export async function upsertLeader(leader: Leader): Promise<boolean> {
       .upsert(payload);
     if (error) {
       if (error.message && (error.message.includes('column') || error.message.includes('relation'))) {
-        console.warn('Supabase leaders table password column fallback triggered:', error.message);
+        console.warn('Supabase leaders table fallback triggered:', error.message);
         delete payload.password;
+        delete payload.is_admin;
         const { error: retryError } = await supabase
           .from('leaders')
           .upsert(payload);

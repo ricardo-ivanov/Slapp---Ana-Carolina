@@ -32,8 +32,10 @@ import {
   Phone,
   QrCode,
   Settings,
+  ClipboardList,
   ArrowUp,
   ArrowDown,
+  ArrowRight,
   LockOpen,
   Mail,
   LogIn,
@@ -116,6 +118,22 @@ function validateCPF(cpf: string): boolean {
   return true;
 }
 
+function formatCollectionDate(reg: Registration): string {
+  if (!reg.createdAt) return reg.date || '';
+  try {
+    const d = new Date(reg.createdAt);
+    if (isNaN(d.getTime())) return reg.date || '';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} - ${hours}:${minutes}`;
+  } catch (err) {
+    return reg.date || '';
+  }
+}
+
 export default function App() {
   // Authentication State
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
@@ -158,6 +176,15 @@ export default function App() {
     return stored ? JSON.parse(stored) : INITIAL_FORM_FIELDS;
   });
 
+  const [categoriesList, setCategoriesList] = useState<string[]>(() => {
+    const stored = localStorage.getItem('admin_categories_list');
+    return stored ? JSON.parse(stored) : CATEGORIES_LIST;
+  });
+
+  const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [editingCategoryIndex, setEditingCategoryIndex] = useState<number | null>(null);
+  const [editingCategoryText, setEditingCategoryText] = useState('');
+
   const [activeView, setActiveView] = useState<ActiveView>(() => {
     const stored = localStorage.getItem('active_view');
     return (stored as ActiveView) || 'dashboard';
@@ -170,7 +197,7 @@ export default function App() {
 
   // UI States
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [showNotification, setShowNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const [showNotification, setShowNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' | 'warning' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddRegistrationModal, setShowAddRegistrationModal] = useState(false);
   const [showAddLeaderModal, setShowAddLeaderModal] = useState(false);
@@ -194,6 +221,7 @@ export default function App() {
   const [filterEndDate, setFilterEndDate] = useState('2026-05-31');
   const [filterLeader, setFilterLeader] = useState('Todas as Lideranças');
   const [filterCategory, setFilterCategory] = useState('Todas as Categorias');
+  const [filterRegion, setFilterRegion] = useState('Todas as Regiões');
 
   // Synchronize filterPeriod string with visual date selection
   useEffect(() => {
@@ -234,7 +262,7 @@ export default function App() {
 
   // New Registration Form inputs (constructed dynamically using dynamic fields)
   const [dynamicFormInput, setDynamicFormInput] = useState<Record<string, string>>({});
-  const [newRegistrationCategory, setNewRegistrationCategory] = useState(CATEGORIES_LIST[0]);
+  const [newRegistrationCategory, setNewRegistrationCategory] = useState(categoriesList[0] || 'Geral');
   const [newRegistrationLeader, setNewRegistrationLeader] = useState('');
 
   // New Leader Input
@@ -265,8 +293,9 @@ export default function App() {
     localStorage.setItem('admin_leaders', JSON.stringify(leaders));
     localStorage.setItem('admin_registrations', JSON.stringify(registrations));
     localStorage.setItem('admin_form_fields', JSON.stringify(formFields));
+    localStorage.setItem('admin_categories_list', JSON.stringify(categoriesList));
     localStorage.setItem('active_view', activeView);
-  }, [isLoggedIn, profile, leaders, registrations, formFields, activeView]);
+  }, [isLoggedIn, profile, leaders, registrations, formFields, categoriesList, activeView]);
 
   // Set default leader selection for new registrations
   useEffect(() => {
@@ -488,14 +517,12 @@ export default function App() {
             }
             setFormFields(INITIAL_FORM_FIELDS);
           }
-
-          triggerNotification('Dados sincronizados com o Supabase com sucesso!', 'success');
         } catch (error) {
-          console.error('Failed to pre-seed/fetch Supabase database:', error);
-          triggerNotification('Conectado ao Supabase, mas erro ao carregar tabelas.', 'error');
+          console.error('Failed to pre-seed/fetch database:', error);
+          triggerNotification('Conectado ao servidor, mas ocorreu um erro ao carregar as tabelas.', 'error');
         }
       } else {
-        triggerNotification('Incapaz de conectar ao Supabase. Rodando localmente.', 'info');
+        triggerNotification('Incapaz de conectar ao servidor. Rodando localmente com armazenamento no navegador.', 'info');
       }
       setIsLoadingFromSupabase(false);
     };
@@ -528,7 +555,7 @@ export default function App() {
   }, [formFields, isSupabaseConnected, isLoadingFromSupabase]);
 
   // Trigger brief alert banners
-  const triggerNotification = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+  const triggerNotification = (message: string, type: 'success' | 'info' | 'error' | 'warning' = 'success') => {
     setShowNotification({ message, type });
     setTimeout(() => {
       setShowNotification(null);
@@ -581,6 +608,7 @@ export default function App() {
 
     let userExists = false;
     let userName = 'Usuário';
+    let isLeaderAdmin = false;
 
     // Check with Supabase if configured
     if (isSupabaseConnected) {
@@ -589,6 +617,7 @@ export default function App() {
         if (dbProf) {
           userExists = true;
           userName = dbProf.name;
+          isLeaderAdmin = dbProf.isAdmin !== undefined ? dbProf.isAdmin : checkIfEmailIsAdmin(emailLower);
         }
       } catch (err) {
         console.error(err);
@@ -600,17 +629,21 @@ export default function App() {
       if (emailLower === 'ana.carolina@lideranca.com') {
         userExists = true;
         userName = 'Ana Carolina Oliveira';
+        isLeaderAdmin = true;
       } else if (emailLower === 'contato@ricardoivanov.com.br') {
         userExists = true;
         userName = 'Ricardo Ivanov';
+        isLeaderAdmin = true;
       } else if (emailLower === profile.email.trim().toLowerCase()) {
         userExists = true;
         userName = profile.name;
+        isLeaderAdmin = profile.isAdmin;
       } else {
         const matched = leaders.find(l => l.email.trim().toLowerCase() === emailLower);
         if (matched) {
           userExists = true;
           userName = matched.name;
+          isLeaderAdmin = matched.isAdmin !== undefined ? matched.isAdmin : checkIfEmailIsAdmin(emailLower);
         }
       }
     }
@@ -620,67 +653,18 @@ export default function App() {
       return;
     }
 
-    // Generate link with token & email payload
-    const resetLink = `${window.location.protocol}//${window.location.host}?reset_email=${encodeURIComponent(emailLower)}&reset_token=token_${Math.random().toString(36).substr(2, 9)}`;
-
-    try {
-      triggerNotification('Enviando e-mail de recuperação...', 'info');
-      const response = await fetch('/api/send-recovery-email', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          email: emailLower,
-          name: userName,
-          resetLink: resetLink
-        })
-      });
-
-      const resData = await response.json();
-
-      if (resData.success) {
-        if (resData.method === 'smtp') {
-          triggerNotification('Instruções enviadas com sucesso para o seu e-mail corporativo!', 'success');
-          setMockEmailInbox({
-            to: emailLower,
-            subject: 'Recuperação de Senha - Central Administrativa',
-            body: '',
-            link: resetLink
-          });
-        } else if (resData.method === 'ethereal') {
-          triggerNotification('Demonstração: E-mail de teste gerado no Ethereal Sandbox!', 'success');
-          setMockEmailInbox({
-            to: emailLower,
-            subject: 'Recuperação de Senha - Central Administrativa (Ethereal Sandbox)',
-            body: `Olá, ${userName}!\n\nSeu servidor em preview utilizou a conta sandbox temporária do Ethereal Mail para transmitir esta mensagem.`,
-            link: resetLink
-          });
-        } else {
-          // console connection
-          triggerNotification('Servidor sem conexão: Link gerado no terminal do servidor.', 'info');
-          setMockEmailInbox({
-            to: emailLower,
-            subject: 'Recuperação de Senha - Log de Terminal',
-            body: `Olá, ${userName}!`,
-            link: resetLink
-          });
-        }
-        setAuthMode('forgot_success');
-      } else {
-        throw new Error(resData.error || 'Erro na resposta do servidor.');
-      }
-    } catch (apiErr: any) {
-      console.warn('API /api/send-recovery-email failed, using elegant frontend fail-safe simulation:', apiErr);
-      setMockEmailInbox({
-        to: emailLower,
-        subject: 'Recuperação de Senha - Central Administrativa de Lideranças',
-        body: `Olá, ${userName}!\n\nRecebemos uma solicitação para redefinir a senha da sua conta de acesso ao Painel de Cadastros.\n\nClique no botão abaixo para definir uma nova senha:`,
-        link: resetLink
-      });
-      triggerNotification('Simulação local gerada com sucesso!', 'success');
-      setAuthMode('forgot_success');
+    // Double-check if the resolved role is admin
+    if (isLeaderAdmin) {
+      triggerNotification('Usuários do tipo Administrador só poderão trocar a senha via banco de dados.', 'error');
+      return;
     }
+
+    // Since user is a verified Liderança, immediately display the password reset fields!
+    setResetPasswordEmail(emailLower);
+    setResetPasswordToken(`token_direct_${Math.random().toString(36).substr(2, 9)}`);
+    setMockEmailInbox(null); // Ensure no old simulated modal is displayed
+    triggerNotification('Identidade confirmada! Defina sua nova senha de acesso abaixo.', 'success');
+    setAuthMode('reset');
   };
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -699,36 +683,56 @@ export default function App() {
     const targetEmail = resetPasswordEmail.trim().toLowerCase();
     let updatedLocalState = false;
 
-    // Check if it's the current profile
-    if (profile && profile.email.trim().toLowerCase() === targetEmail) {
-      const updatedProfile = { ...profile, password: newResetPassword };
-      setProfile(updatedProfile);
-      if (isSupabaseConnected) {
-        await upsertProfile(profile.id || 'p1', updatedProfile);
-      }
-      updatedLocalState = true;
-    }
-
-    // Also update any matching leader in leaders table/state
-    const updatedLeaders = leaders.map(l => {
-      if (l.email.trim().toLowerCase() === targetEmail) {
-        const updatedLeader = { ...l, password: newResetPassword };
+    try {
+      // 1. Check if the currently logged-in profile matches
+      if (profile && profile.email.trim().toLowerCase() === targetEmail) {
+        const updatedProfile = { ...profile, password: newResetPassword };
+        setProfile(updatedProfile);
         if (isSupabaseConnected) {
-          upsertLeader(updatedLeader).catch(console.error);
+          await upsertProfile(profile.id || 'p1', updatedProfile);
         }
         updatedLocalState = true;
-        return updatedLeader;
       }
-      return l;
-    });
-    setLeaders(updatedLeaders);
 
-    triggerNotification('Senha redefinida com sucesso! Você já pode realizar o login.', 'success');
-    setAuthMode('login');
-    setNewResetPassword('');
-    setConfirmResetPassword('');
-    setResetPasswordEmail('');
-    setResetPasswordToken('');
+      // 2. Query and update profile directly from the 'profiles' database table as well (for future logins matching dbProfile first)
+      if (isSupabaseConnected) {
+        const dbProfile = await fetchProfileByEmail(targetEmail);
+        if (dbProfile) {
+          const updatedDbProfile = { ...dbProfile, password: newResetPassword };
+          await upsertProfile(dbProfile.id, updatedDbProfile);
+          updatedLocalState = true;
+        }
+      }
+
+      // 3. Update any matching leader in leaders database table and local state
+      const dbUpdates: Promise<boolean>[] = [];
+      const updatedLeaders = leaders.map(l => {
+        if (l.email.trim().toLowerCase() === targetEmail) {
+          const updatedLeader = { ...l, password: newResetPassword };
+          if (isSupabaseConnected) {
+            dbUpdates.push(upsertLeader(updatedLeader));
+          }
+          updatedLocalState = true;
+          return updatedLeader;
+        }
+        return l;
+      });
+
+      if (dbUpdates.length > 0) {
+        await Promise.all(dbUpdates);
+      }
+      setLeaders(updatedLeaders);
+
+      triggerNotification('Senha redefinida com sucesso! Você já pode realizar o login.', 'success');
+      setAuthMode('login');
+      setNewResetPassword('');
+      setConfirmResetPassword('');
+      setResetPasswordEmail('');
+      setResetPasswordToken('');
+    } catch (dbErr: any) {
+      console.error('Erro ao salvar nova senha no banco de dados:', dbErr);
+      triggerNotification('Ocorreu um erro ao atualizar os dados no banco. Tente novamente.', 'error');
+    }
   };
 
   // Auth Handler
@@ -741,6 +745,13 @@ export default function App() {
     }
 
     triggerNotification('Verificando credenciais...', 'info');
+
+    // Check if account has been marked as Inactive/disabled
+    const deactLeader = leaders.find(l => l.email.trim().toLowerCase() === emailLower);
+    if (deactLeader && deactLeader.status === 'Inativo') {
+      triggerNotification('Sua conta foi desativada. Entre em contato com um administrador.', 'warning');
+      return;
+    }
 
     // 1. Try to fetch profile from Supabase by email
     let dbProfile: UserProfile | null = null;
@@ -755,7 +766,7 @@ export default function App() {
         triggerNotification('Senha incorreta! Por favor, tente novamente.', 'error');
         return;
       }
-      const isAdminRole = checkIfEmailIsAdmin(emailLower);
+      const isAdminRole = dbProfile.isAdmin !== undefined ? dbProfile.isAdmin : checkIfEmailIsAdmin(emailLower);
       const userProfile: UserProfile = {
         ...dbProfile,
         isAdmin: isAdminRole
@@ -771,7 +782,7 @@ export default function App() {
     const matchingLeader = leaders.find(l => l.email.trim().toLowerCase() === emailLower);
     if (matchingLeader) {
       if (matchingLeader.status === 'Inativo') {
-        triggerNotification('Esta conta de liderança está inativa. Entre em contato com o administrador.', 'error');
+        triggerNotification('Sua conta foi desativada. Entre em contato com um administrador.', 'warning');
         return;
       }
       
@@ -781,7 +792,7 @@ export default function App() {
         return;
       }
       
-      const isLeaderAdmin = checkIfEmailIsAdmin(emailLower);
+      const isLeaderAdmin = matchingLeader.isAdmin !== undefined ? matchingLeader.isAdmin : checkIfEmailIsAdmin(emailLower);
       const leaderProfile: UserProfile = {
         id: matchingLeader.id,
         name: matchingLeader.name,
@@ -979,13 +990,21 @@ export default function App() {
     // Find target leader metadata
     const selectedLeaderObj = leaders.find(l => l.id === newRegistrationLeader) || leaders[0];
 
+    const nowStr = new Date();
+    const dDay = String(nowStr.getDate()).padStart(2, '0');
+    const dMonth = String(nowStr.getMonth() + 1).padStart(2, '0');
+    const dYear = nowStr.getFullYear();
+    const dHours = String(nowStr.getHours()).padStart(2, '0');
+    const dMinutes = String(nowStr.getMinutes()).padStart(2, '0');
+    const formattedColDate = `${dDay}/${dMonth}/${dYear} - ${dHours}:${dMinutes}`;
+
     const newReg: Registration = {
       id: 'reg_' + Date.now(),
       name: nameValue,
       category: newRegistrationCategory,
       leaderId: selectedLeaderObj.id,
       leaderName: selectedLeaderObj.name,
-      date: 'Hoje, ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      date: formattedColDate,
       createdAt: new Date().toISOString(),
       ...dynamicFormInput
     };
@@ -1038,7 +1057,7 @@ export default function App() {
         reg.name || '',
         reg.leaderName || '',
         reg.category || '',
-        reg.date || '',
+        formatCollectionDate(reg),
         ...dynamicFields.map(f => reg[f.id] !== undefined && reg[f.id] !== null ? String(reg[f.id]) : '')
       ];
     });
@@ -2083,18 +2102,18 @@ export default function App() {
       upsertProfile(profileId, profile)
         .then(success => {
           if (success) {
-            triggerNotification('Perfil corporativo sincronizado no Supabase!', 'success');
+            triggerNotification('Perfil corporativo atualizado com sucesso!', 'success');
           } else {
-            triggerNotification('Perfil corporativo salvo localmente!', 'success');
+            triggerNotification('Perfil corporativo salvo!', 'success');
           }
         })
         .catch(err => {
           console.error(err);
-          triggerNotification('Perfil salvo localmente.', 'success');
+          triggerNotification('Perfil salvo com sucesso!', 'success');
         });
     } else {
       setTimeout(() => {
-        triggerNotification('Alterações de perfil salvas com sucesso localmente!', 'success');
+        triggerNotification('Alterações de perfil salvas com sucesso!', 'success');
       }, 500);
     }
   };
@@ -2169,9 +2188,9 @@ export default function App() {
     setCurrentPass('••••••••');
 
     if (databaseSaved) {
-      triggerNotification('Senha alterada e sincronizada no banco de dados com sucesso!', 'success');
+      triggerNotification('Senha alterada com sucesso!', 'success');
     } else {
-      triggerNotification('Senha alterada com sucesso localmente!', 'success');
+      triggerNotification('Senha alterada com sucesso!', 'success');
     }
   };
 
@@ -2179,6 +2198,55 @@ export default function App() {
   const handleCopyLink = (text: string) => {
     navigator.clipboard.writeText(text);
     triggerNotification('Link exclusivo copiado com sucesso!', 'success');
+  };
+
+  // Category CRUD Handlers
+  const handleAddCategory = () => {
+    const trimmed = newCategoryInput.trim();
+    if (!trimmed) return;
+    if (categoriesList.includes(trimmed)) {
+      triggerNotification('Esta categoria já existe!', 'warning');
+      return;
+    }
+    setCategoriesList([...categoriesList, trimmed]);
+    setNewCategoryInput('');
+    triggerNotification('Categoria adicionada com sucesso!', 'success');
+  };
+
+  const handleDeleteCategory = (catToDelete: string) => {
+    setCategoriesList(categoriesList.filter(c => c !== catToDelete));
+    triggerNotification('Categoria removida!', 'success');
+  };
+
+  const handleStartEditCategory = (index: number, currentText: string) => {
+    setEditingCategoryIndex(index);
+    setEditingCategoryText(currentText);
+  };
+
+  const handleSaveEditCategory = (index: number) => {
+    const trimmed = editingCategoryText.trim();
+    if (!trimmed) return;
+    if (categoriesList.includes(trimmed) && categoriesList[index] !== trimmed) {
+      triggerNotification('Esta categoria já existe!', 'warning');
+      return;
+    }
+    
+    const updated = [...categoriesList];
+    const oldName = updated[index];
+    updated[index] = trimmed;
+    setCategoriesList(updated);
+    
+    // Auto-update any registrations that were in this old category so they don't lose history
+    setRegistrations(prev => prev.map(r => r.category === oldName ? { ...r, category: trimmed } : r));
+
+    setEditingCategoryIndex(null);
+    setEditingCategoryText('');
+    triggerNotification('Categoria editada!', 'success');
+  };
+
+  const handleCancelEditCategory = () => {
+    setEditingCategoryIndex(null);
+    setEditingCategoryText('');
   };
 
   // Support for role-based restricted access (Liderança vs. Admin)
@@ -2190,6 +2258,44 @@ export default function App() {
     return registrations;
   }, [registrations, isLoggedIn, profile.isAdmin, profile.id, profile.name, profile.email]);
 
+  // Helper to determine registration region dynamically with fallback matching
+  const getRegistrationRegion = (r: Registration) => {
+    const regionField = formFields.find(f => 
+      f.label.toLowerCase().includes('regiã') || 
+      f.label.toLowerCase().includes('setor') || 
+      f.label.toLowerCase().includes('bairro')
+    );
+    const regionFieldId = regionField?.id || 'f4';
+    const defaultRegionOptions = regionField?.options || ['Regional Norte', 'Regional Sul', 'Regional Leste', 'Regional Oeste'];
+
+    const val = r[regionFieldId] || r.region;
+    if (val) return val;
+
+    // Fallback assignment
+    const idStr = r.id || 'r';
+    const charCodeSum = idStr.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+    return defaultRegionOptions[charCodeSum % defaultRegionOptions.length];
+  };
+
+  // Get active list of regions
+  const availableRegions = useMemo(() => {
+    const regionField = formFields.find(f => 
+      f.label.toLowerCase().includes('regiã') || 
+      f.label.toLowerCase().includes('setor') || 
+      f.label.toLowerCase().includes('bairro')
+    );
+    const regionFieldId = regionField?.id || 'f4';
+    const defaultRegionOptions = regionField?.options || ['Regional Norte', 'Regional Sul', 'Regional Leste', 'Regional Oeste'];
+
+    const regionsSet = new Set<string>();
+    defaultRegionOptions.forEach(rOpt => regionsSet.add(rOpt));
+    registrations.forEach(r => {
+      const rVal = r[regionFieldId] || r.region;
+      if (rVal) regionsSet.add(rVal);
+    });
+    return Array.from(regionsSet);
+  }, [formFields, registrations]);
+
   // Dynamic values based on filters in Reports screen
   const filteredRegistrations = visibleRegistrations.filter(r => {
     const query = searchQuery.toLowerCase().trim();
@@ -2197,6 +2303,7 @@ export default function App() {
     
     const leaderMatch = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
     const categoryMatch = filterCategory === 'Todas as Categorias' || r.category.includes(filterCategory);
+    const regionMatch = filterRegion === 'Todas as Regiões' || getRegistrationRegion(r) === filterRegion;
 
     // Filter by Date period
     let dateMatch = true;
@@ -2211,7 +2318,7 @@ export default function App() {
       }
     }
 
-    return queryMatch && leaderMatch && categoryMatch && dateMatch;
+    return queryMatch && leaderMatch && categoryMatch && regionMatch && dateMatch;
   });
 
   // KPI aggregates
@@ -2322,7 +2429,7 @@ export default function App() {
         const dayLabel = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
         
         // Count actual registrations created on this exact day
-        const matches = registrations.filter(r => {
+        const matches = visibleRegistrations.filter(r => {
           if (!r.createdAt) return false;
           const regDate = new Date(r.createdAt);
           const matchesLeader = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
@@ -2371,7 +2478,7 @@ export default function App() {
         
         const label = i === 0 ? 'S-Atual' : `S-${i}`;
         
-        const matches = registrations.filter(r => {
+        const matches = visibleRegistrations.filter(r => {
           if (!r.createdAt) return false;
           const regDate = new Date(r.createdAt);
           const matchesLeader = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
@@ -2415,7 +2522,7 @@ export default function App() {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const monthLabel = monthsAbbrev[d.getMonth()] + '/' + String(d.getFullYear()).substring(2);
         
-        const matches = registrations.filter(r => {
+        const matches = visibleRegistrations.filter(r => {
           if (!r.createdAt) return false;
           const regDate = new Date(r.createdAt);
           const matchesLeader = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
@@ -2450,12 +2557,12 @@ export default function App() {
         growth: calculateGrowthValue(points)
       };
     }
-  }, [performancePeriod, registrations, filterLeader, filterCategory, filterStartDate, filterEndDate]);
+  }, [performancePeriod, visibleRegistrations, filterLeader, filterCategory, filterStartDate, filterEndDate]);
 
   // Dynamic Categories calculation for Pie Chart
   const categoriesWithCount = useMemo(() => {
     const categoriesSet = new Set<string>();
-    CATEGORIES_LIST.forEach(c => categoriesSet.add(c));
+    categoriesList.forEach(c => categoriesSet.add(c));
     formFields.forEach(f => {
       if (f.label.toLowerCase().includes('categoria') && f.options) {
         f.options.forEach(opt => categoriesSet.add(opt));
@@ -2484,7 +2591,7 @@ export default function App() {
       return Object.entries(counts).map(([category]) => ({ category, count: 0 }));
     }
     return list.sort((a, b) => b.count - a.count);
-  }, [filteredRegistrations, registrations, formFields]);
+  }, [filteredRegistrations, registrations, formFields, categoriesList]);
 
   // Dynamic Regions calculation for Pie Chart
   const regionsWithCount = useMemo(() => {
@@ -2539,6 +2646,7 @@ export default function App() {
       success: 'bg-[#dcfce7] text-[#166534] border-[#166534]/20',
       info: 'bg-[#e2dfff] text-[#3323cc] border-[#3323cc]/20',
       error: 'bg-[#fee2e2] text-[#991b1b] border-[#991b1b]/20',
+      warning: 'bg-[#fef9c3] text-[#854d0e] border-[#eab308]/50',
     };
     return (
       <div className={`fixed bottom-6 right-6 z-[9999] p-4 rounded-xl border-l-4 font-sans font-medium text-sm flex items-center gap-3 lifted-shadow animate-bounce ${statusClasses[showNotification.type]}`}>
@@ -2597,13 +2705,21 @@ export default function App() {
     const nameField = formFields.find(f => f.id === 'f1') || formFields[0];
     const nameValue = dynamicFormInput[nameField?.id] || dynamicFormInput['f1'] || 'Membro Anônimo';
 
+    const nowStr = new Date();
+    const dDay = String(nowStr.getDate()).padStart(2, '0');
+    const dMonth = String(nowStr.getMonth() + 1).padStart(2, '0');
+    const dYear = nowStr.getFullYear();
+    const dHours = String(nowStr.getHours()).padStart(2, '0');
+    const dMinutes = String(nowStr.getMinutes()).padStart(2, '0');
+    const formattedColDate = `${dDay}/${dMonth}/${dYear} - ${dHours}:${dMinutes}`;
+
     const newReg: Registration = {
       id: 'reg_' + Date.now(),
       name: nameValue,
       category: newRegistrationCategory,
       leaderId: selectedLeaderObj.id,
       leaderName: selectedLeaderObj.name,
-      date: 'Hoje, ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      date: formattedColDate,
       createdAt: new Date().toISOString(),
       ...dynamicFormInput
     };
@@ -2728,7 +2844,7 @@ export default function App() {
                 <div className="w-full space-y-3">
                   <div className="flex items-center gap-2 mb-1">
                     <LockOpen className="w-4 h-4 text-[#4d44e3]" />
-                    <span className="text-xs font-bold text-[#4d44e3] uppercase tracking-wider">Selecione o Líder de Campo de seu Atendimento</span>
+                    <span className="text-xs font-bold text-[#4d44e3] uppercase tracking-wider">Selecione o Líder</span>
                   </div>
                   
                   <select 
@@ -2748,7 +2864,7 @@ export default function App() {
 
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                Categoria de Atendimento <span className="text-red-500">*</span>
+                Categoria<span className="text-red-500">*</span>
               </label>
               <select 
                 required
@@ -2756,7 +2872,7 @@ export default function App() {
                 onChange={(e) => setNewRegistrationCategory(e.target.value)}
                 className="w-full bg-gray-50 text-xs py-3 px-4 rounded-lg border border-gray-200 outline-none font-semibold text-gray-800 focus:bg-white focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] transition-colors"
               >
-                {CATEGORIES_LIST.map((cat, idx) => (
+                {categoriesList.map((cat, idx) => (
                   <option key={idx} value={cat}>{cat}</option>
                 ))}
               </select>
@@ -3019,14 +3135,19 @@ export default function App() {
               {authMode === 'forgot' && (
                 <>
                   <div className="mb-8 font-sans">
-                    <h2 className="text-2xl font-bold text-[#191c1e] tracking-tight mb-1">Recuperar Senha</h2>
-                    <p className="text-sm text-gray-500">Informe seu e-mail corporativo cadastrado para receber o link de recuperação de senha.</p>
+                    <h2 className="text-2xl font-bold text-[#191c1e] tracking-tight mb-1.5">Alterar Senha de Liderança</h2>
+                    <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
+                      Lideranças de Campo podem alterar sua senha de forma simplificada em poucos segundos.
+                    </p>
+                    <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-100 p-2.5 rounded-lg mt-3 leading-tight font-medium">
+                      ⚠️ Administradores do sistema não possuem permissão para realizar alteração por esta tela (apenas via banco de dados).
+                    </p>
                   </div>
 
                   <form onSubmit={handleRequestPasswordRecovery} className="space-y-6">
                     {/* E-mail Form Field */}
                     <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">E-mail Cadastrado</label>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5 font-sans">E-mail de Cadastro</label>
                       <div className="relative">
                         <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
                           <Mail className="w-5 h-5" />
@@ -3036,18 +3157,18 @@ export default function App() {
                           required
                           value={forgotEmail}
                           onChange={(e) => setForgotEmail(e.target.value)}
-                          className="w-full bg-white text-sm py-3 pl-11 pr-4 rounded-lg outline-none border border-gray-200 focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] text-[#191c1e] transition-all placeholder:text-gray-400"
-                          placeholder="seu@email.com"
+                          className="w-full bg-white text-sm py-3 pl-11 pr-4 rounded-lg outline-none border border-gray-200 focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] text-[#191c1e] transition-all placeholder:text-gray-400 font-sans"
+                          placeholder="seu@lideranca.com"
                         />
                       </div>
                     </div>
 
                     <button
                       type="submit"
-                      className="w-full py-3.5 bg-[#4d44e3] hover:bg-[#3d34d3] text-white rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer shadow-md shadow-[#4d44e3]/10"
+                      className="w-full py-3.5 bg-[#3525cd] hover:bg-[#2515bd] text-white rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer shadow-md shadow-[#3525cd]/15 font-sans"
                     >
-                      <span>Enviar Link de Recuperação</span>
-                      <Mail className="w-4 h-4" />
+                      <span>Verificar Perfil e Prosseguir</span>
+                      <ArrowRight className="w-4 h-4" />
                     </button>
 
                     <div className="text-center mt-4">
@@ -3197,8 +3318,8 @@ export default function App() {
               <Users className="w-5 h-5 text-white" />
             </div>
             <div>
-              <span className="text-white font-bold text-lg tracking-tight block leading-none">AdminCore</span>
-              <span className="text-[#c4c1fb] text-[10px] uppercase font-mono tracking-wider">Painel Executivo</span>
+              <span className="text-white font-bold text-lg tracking-tight block leading-none">Painel de Cadastros</span>
+              <span className="text-[#c4c1fb] text-[10px] uppercase font-mono tracking-wider">Ana Carolina Oliveira</span>
             </div>
           </div>
           
@@ -3207,7 +3328,7 @@ export default function App() {
             {renderSidebarItem('dashboard', 'Dashboard', <LayoutDashboard className="w-4 h-4" />)}
             {renderSidebarItem('cadastros', 'Cadastros Realizados', <Users className="w-4 h-4" />)}
             {profile.isAdmin && renderSidebarItem('lideranças', 'Gestão de Lideranças', <Layers className="w-4 h-4" />)}
-            {profile.isAdmin && renderSidebarItem('formulário', 'Formulário Dinâmico', <Settings className="w-4 h-4" />)}
+            {profile.isAdmin && renderSidebarItem('formulário', 'Formulário Dinâmico', <ClipboardList className="w-4 h-4" />)}
             {profile.isAdmin && renderSidebarItem('relatórios', 'Relatórios & Demografia', <BarChart3 className="w-4 h-4" />)}
             {renderSidebarItem('perfil', 'Meu Perfil', <User className="w-4 h-4" />)}
           </nav>
@@ -3255,23 +3376,23 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'tween', duration: 0.25, ease: 'easeOut' }}
-              className="fixed inset-y-0 left-0 w-64 bg-[#181445] flex flex-col z-50 justify-between shadow-2xl lg:hidden"
+              className="fixed inset-y-0 left-0 w-80 bg-[#181445] flex flex-col z-50 justify-between shadow-2xl lg:hidden"
             >
-              <div>
+              <div className="relative">
                 {/* Logo brand area & close handler */}
-                <div className="p-6 border-b border-[#444173] flex items-center justify-between">
+                <div className="p-6 border-b border-[#444173] flex items-center pr-12">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-[#4f46e5] rounded-lg flex items-center justify-center border border-[#c3c0ff]/20">
+                    <div className="w-8 h-8 bg-[#4f46e5] rounded-lg flex items-center justify-center border border-[#c3c0ff]/20 shrink-0">
                       <Users className="w-5 h-5 text-white" />
                     </div>
-                    <div>
-                      <span className="text-white font-bold text-lg tracking-tight block leading-none">AdminCore</span>
-                      <span className="text-[#c4c1fb] text-[10px] uppercase font-mono tracking-wider">Painel Executivo</span>
+                    <div className="min-w-0">
+                      <span className="text-white font-bold text-lg tracking-tight block leading-none whitespace-nowrap">Painel de Cadastros</span>
+                      <span className="text-[#c4c1fb] text-[10px] uppercase font-mono tracking-wider block mt-1 whitespace-nowrap overflow-hidden text-ellipsis">Ana Carolina Oliveira</span>
                     </div>
                   </div>
                   <button 
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className="p-1.5 rounded-lg text-[#c4c1fb] hover:text-white hover:bg-white/10 transition-colors"
+                    className="absolute top-5 right-4 p-1.5 rounded-lg text-[#c4c1fb] hover:text-white hover:bg-white/10 transition-colors"
                     title="Fechar menu"
                   >
                     <X className="w-5 h-5" />
@@ -3283,7 +3404,7 @@ export default function App() {
                   {renderSidebarItem('dashboard', 'Dashboard', <LayoutDashboard className="w-4 h-4" />)}
                   {renderSidebarItem('cadastros', 'Cadastros Realizados', <Users className="w-4 h-4" />)}
                   {profile.isAdmin && renderSidebarItem('lideranças', 'Gestão de Lideranças', <Layers className="w-4 h-4" />)}
-                  {profile.isAdmin && renderSidebarItem('formulário', 'Formulário Dinâmico', <Settings className="w-4 h-4" />)}
+                  {profile.isAdmin && renderSidebarItem('formulário', 'Formulário Dinâmico', <ClipboardList className="w-4 h-4" />)}
                   {profile.isAdmin && renderSidebarItem('relatórios', 'Relatórios & Demografia', <BarChart3 className="w-4 h-4" />)}
                   {renderSidebarItem('perfil', 'Meu Perfil', <User className="w-4 h-4" />)}
                 </nav>
@@ -3344,12 +3465,12 @@ export default function App() {
             </h1>
           </div>
 
-          {/* Supabase Status Pill */}
+          {/* Status Pill */}
           <div className="hidden md:flex items-center gap-2">
             {!isSupabaseConfigured ? (
               <div 
                 className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs font-semibold cursor-help shadow-sm"
-                title="Sincronização em localStorage ativa. Adicione as chaves VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no seu .env para conectar ao Supabase."
+                title="Sincronização em localStorage ativa. Adicione as chaves no seu .env para conectar ao banco de dados."
               >
                 <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                 <Database className="w-3.5 h-3.5 text-amber-500" />
@@ -3358,20 +3479,20 @@ export default function App() {
             ) : isSupabaseConnected ? (
               <div 
                 className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-semibold shadow-sm"
-                title="Integrado e sincronizando em tempo real com o banco de dados Supabase."
+                title="Integrado e sincronizando em tempo real com o banco de dados."
               >
                 <div className="w-2 h-2 rounded-full bg-emerald-500" />
                 <Database className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
-                <span>Supabase Conectado</span>
+                <span>Conectado</span>
               </div>
             ) : (
               <div 
                 className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-semibold shadow-sm"
-                title="As credenciais do Supabase foram encontradas, mas a conexão falhou. Verifique seu banco ou as chaves no arquivo de configuração do ambiente."
+                title="As credenciais foram encontradas, mas a conexão com o banco de dados falhou. Verifique sua conexão ou chaves de ambiente."
               >
                 <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
                 <Database className="w-3.5 h-3.5 text-rose-500" />
-                <span>Erro no Supabase</span>
+                <span>Erro de Conexão</span>
               </div>
             )}
           </div>
@@ -3406,31 +3527,34 @@ export default function App() {
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
                 
                 <div className={`col-span-2 ${profile.isAdmin ? 'lg:col-span-3' : 'lg:col-span-3'} bg-gradient-to-br from-[#3525cd] via-[#4f46e5] to-[#181445] p-6 rounded-2xl text-white flex flex-col justify-between shadow-lg relative overflow-hidden`}>
-                  <div className="relative z-10 max-w-xl">
-                    <h2 className="text-3xl font-bold tracking-tight mb-2">Olá, {profile.name}!</h2>
-                    <p className="text-[#c4c1fb] text-sm font-light leading-relaxed mb-4">
-                      Seu desempenho este mês superou a média em <strong className="text-white font-semibold">12%</strong>. Todas as ferramentas dinâmicas de fidelização e auditoria estão prontas para uso.
-                    </p>
-                  </div>
-                  <div className="relative z-10 flex gap-3 mt-4">
-                    {profile.isAdmin && (
-                      <button 
-                        onClick={() => setActiveView('relatórios')}
-                        className="bg-white text-[#3525cd] hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 shadow transition-colors"
-                      >
-                        <BarChart3 className="w-3.5 h-3.5" />
-                        <span>Ver Relatórios Avançados</span>
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => setActiveView('cadastros')}
-                      className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-colors"
-                    >
-                      <span>{profile.isAdmin ? 'Visualizar Todos os Cadastros' : 'Visualizar Meus Cadastros'}</span>
-                    </button>
+                  <div className="relative z-10 w-full">
+                    <h2 className="text-2xl sm:text-3xl font-bold tracking-tight mb-4">Olá, {profile.name}!</h2>
+                    
+                    {/* Exclusivo link section in place of performance text & buttons */}
+                    <div className="bg-white/10 p-4 rounded-xl border border-white/15 space-y-3 shadow-inner">
+                      <div className="flex items-center gap-2 text-white font-bold text-xs uppercase tracking-wider">
+                        <Share2 className="w-4 h-4 text-[#c4c1fb]" />
+                        <span>Link Exclusivo de Coleta</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 bg-[#181445]/40 p-2.5 rounded-lg border border-white/5 text-xs text-white">
+                        <span className="truncate flex-1 font-mono text-[#e2dfff]">{currentLeaderLink}</span>
+                        <button 
+                          onClick={() => handleCopyLink(currentLeaderLink)}
+                          className="text-white hover:text-[#c4c1fb] p-1.5 rounded hover:bg-white/10 transition-colors"
+                          title="Copiar link"
+                        >
+                          <Copy className="w-4 h-4" />
+                        </button>
+                      </div>
+                      
+                      <p className="text-xs text-[#c4c1fb] font-light leading-relaxed">
+                        Compartilhe este link para atribuir automaticamente e em tempo real todos os novos registros à sua rede de liderança de campo.
+                      </p>
+                    </div>
                   </div>
                   {/* Background decoration bubble grid overlay */}
-                  <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-white/5 rounded-full blur-3xl" />
+                  <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-white/5 rounded-full blur-3xl p-0 pointer-events-none" />
                 </div>
 
                 <div 
@@ -3473,58 +3597,41 @@ export default function App() {
               {/* divulgation and performance columns */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
-                {/* Divulgation tools cards */}
-                <div className="space-y-6">
-                  <h3 className="text-base font-bold text-[#191c1e] uppercase tracking-wider">Divulgação de Campo</h3>
-                  
-                  <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-[#e2dfff] flex items-center justify-center text-[#181445]">
-                        <Share2 className="w-4 h-4" />
-                      </div>
-                      <span className="text-xs font-bold text-[#191c1e] uppercase tracking-wider">Link Exclusivo de Coleta</span>
-                    </div>
-                    <div className="flex items-center gap-2 bg-[#f2f4f6] p-3 rounded-lg border border-[#eceef0] text-xs">
-                      <span className="truncate flex-1 font-mono text-[#464555]">{currentLeaderLink}</span>
-                      <button 
-                        onClick={() => handleCopyLink(currentLeaderLink)}
-                        className="text-[#3525cd] hover:text-[#4f46e5] shrink-0 p-1 rounded hover:bg-white/30"
-                        title="Copiar link"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <p className="text-[11px] text-[#777587]">
-                      Compartilhe este link para atribuir automaticamente e em tempo real todos os novos registros à sua rede de liderança de campo.
+                {/* QR Code Pessoal Card */}
+                <div className="bg-white p-6 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between items-center sm:items-stretch text-center sm:text-left">
+                  <div className="flex flex-col items-center sm:items-start w-full">
+                    <h3 className="text-base font-bold text-[#191c1e] uppercase tracking-wider flex items-center justify-center sm:justify-start gap-2 mb-1">
+                      <QrCode className="w-5 h-5 text-[#3525cd]" />
+                      <span>QR Code Pessoal</span>
+                    </h3>
+                    <p className="text-xs text-[#777587] leading-relaxed mb-4 text-center sm:text-left">
+                      Aponte a câmera do celular para este QR Code para acessar o seu formulário exclusivo de coleta rápida em campo.
                     </p>
                   </div>
-
-                  <div className="bg-white p-4 rounded-2xl border border-[#eceef0] shadow-sm flex items-center justify-between group hover:border-[#3525cd] transition-colors">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2.5">
-                        <QrCode className="w-4 h-4 text-[#3525cd]" />
-                        <span className="text-xs font-bold uppercase tracking-wider text-[#191c1e]">QR Code Pessoal</span>
-                      </div>
-                      <button 
-                        onClick={() => handleDownloadPersonalQR(currentLeaderLink, `qr-code-${profile.name.toLowerCase().replace(/\s+/g, '-')}.png`)}
-                        className="text-xs text-[#3525cd] hover:underline flex items-center gap-1 font-semibold"
-                      >
-                        <Download className="w-3 h-3" />
-                        <span>Baixar PNG</span>
-                      </button>
-                    </div>
-                    <div className="w-16 h-16 bg-[#f2f4f6] p-1 border border-[#eceef0] rounded-xl flex items-center justify-center overflow-hidden">
-                      <QRCodeImage text={currentLeaderLink} size={64} className="w-full h-full object-contain" />
+                  
+                  {/* QR Code grande abaixo do título */}
+                  <div className="flex flex-col items-center justify-center py-5 bg-[#f8fafc] rounded-xl border border-dashed border-gray-200 grow w-full">
+                    <div className="w-40 h-40 bg-white p-2.5 border border-gray-100 rounded-2xl flex items-center justify-center shadow-md">
+                      <QRCodeImage text={currentLeaderLink} size={144} className="w-full h-full object-contain" />
                     </div>
                   </div>
+
+                  {/* link para baixar o QR Code abaixo da imagem do QR Code */}
+                  <button 
+                    onClick={() => handleDownloadPersonalQR(currentLeaderLink, `qr-code-${profile.name.toLowerCase().replace(/\s+/g, '-')}.png`)}
+                    className="mt-4 w-full text-xs text-[#3525cd] hover:text-[#4f46e5] flex items-center justify-center gap-2 font-bold bg-[#e2dfff]/40 hover:bg-[#e2dfff]/70 py-2.5 rounded-lg transition-colors shadow-xs"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar QR Code (PNG)</span>
+                  </button>
                 </div>
 
                 {/* Dynamic graphic line performance chart */}
                 <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4 text-center sm:text-left">
+                    <div className="flex flex-col items-center sm:items-start">
                       <h3 className="text-base font-bold text-[#191c1e] uppercase tracking-wider">Meu Desempenho</h3>
-                      <p className="text-xs text-[#777587]">
+                      <p className="text-xs text-[#777587] text-center sm:text-left">
                         {performanceChartData.subtitle}
                       </p>
                     </div>
@@ -3702,7 +3809,7 @@ export default function App() {
               {/* Table rendering the highly reactive recent data */}
               <div className="bg-white rounded-2xl border border-[#eceef0] shadow-sm overflow-hidden">
                 <div className="px-6 py-4 border-b border-[#eceef0] flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-[#191c1e] uppercase tracking-wider">Seus Cadastros Recentes no Painel</h3>
+                  <h3 className="text-sm font-bold text-[#191c1e] uppercase tracking-wider">Cadastros Recentes</h3>
                   <button 
                     onClick={() => setActiveView('cadastros')} 
                     className="text-[#3525cd] text-xs font-semibold hover:underline"
@@ -3721,44 +3828,52 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#eceef0] text-sm text-[#191c1e]">
-                      {registrations.slice(0, 4).map((reg) => {
-                        return (
-                          <tr key={reg.id} className="hover:bg-[#f7f9fb] transition-colors whitespace-nowrap">
-                            <td className="px-6 py-4 font-semibold">{reg.name}</td>
-                            <td className="px-6 py-4 text-[#777587] font-medium">{reg.leaderName}</td>
-                            <td className="px-6 py-4">
-                              <span className="bg-[#e2dfff] text-[#3323cc] font-mono text-[11px] px-2.5 py-1 rounded-md uppercase tracking-wider">
-                                {reg.category}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <div className="inline-flex gap-1 justify-end">
-                                <button
-                                  onClick={() => handleViewRegistration(reg)}
-                                  className="p-1.5 hover:bg-white text-[#3323cc] hover:text-[#3525cd] rounded-lg border border-transparent hover:border-[#eceef0]"
-                                  title="Visualizar Cadastro"
-                                >
-                                  <Eye className="w-4.5 h-4.5" />
-                                </button>
-                                <button
-                                  onClick={() => handleEditRegistrationClick(reg)}
-                                  className="p-1.5 hover:bg-white text-[#4f46e5] rounded-lg border border-transparent hover:border-[#eceef0]"
-                                  title="Editar Cadastro"
-                                >
-                                  <Edit className="w-4.5 h-4.5" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteRegistration(reg.id, reg.name)}
-                                  className="p-1.5 hover:bg-white text-red-600 rounded-lg border border-transparent hover:border-[#eceef0]"
-                                  title="Remover Registro"
-                                >
-                                  <Trash2 className="w-4.5 h-4.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {visibleRegistrations.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-xs text-[#777587]">
+                            Nenhum cadastro recente realizado.
+                          </td>
+                        </tr>
+                      ) : (
+                        visibleRegistrations.slice(0, 4).map((reg) => {
+                          return (
+                            <tr key={reg.id} className="hover:bg-[#f7f9fb] transition-colors whitespace-nowrap">
+                              <td className="px-6 py-4 font-semibold">{reg.name}</td>
+                              <td className="px-6 py-4 text-[#777587] font-medium">{reg.leaderName}</td>
+                              <td className="px-6 py-4">
+                                <span className="bg-[#e2dfff] text-[#3323cc] font-mono text-[11px] px-2.5 py-1 rounded-md uppercase tracking-wider">
+                                  {reg.category}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <div className="inline-flex gap-1 justify-end">
+                                  <button
+                                    onClick={() => handleViewRegistration(reg)}
+                                    className="p-1.5 hover:bg-white text-[#3323cc] hover:text-[#3525cd] rounded-lg border border-transparent hover:border-[#eceef0]"
+                                    title="Visualizar Cadastro"
+                                  >
+                                    <Eye className="w-4.5 h-4.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleEditRegistrationClick(reg)}
+                                    className="p-1.5 hover:bg-white text-[#4f46e5] rounded-lg border border-transparent hover:border-[#eceef0]"
+                                    title="Editar Cadastro"
+                                  >
+                                    <Edit className="w-4.5 h-4.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteRegistration(reg.id, reg.name)}
+                                    className="p-1.5 hover:bg-white text-red-600 rounded-lg border border-transparent hover:border-[#eceef0]"
+                                    title="Remover Registro"
+                                  >
+                                    <Trash2 className="w-4.5 h-4.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -3794,7 +3909,7 @@ export default function App() {
               </div>
 
               {/* Filtering indicators inside registries */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-[#f2f4f6]/50 p-4 rounded-xl border border-[#eceef0]">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-[#f2f4f6]/50 p-4 rounded-xl border border-[#eceef0]">
                 <div className="relative">
                   <Search className="w-4 h-4 text-[#777587] absolute left-3 top-1/2 -translate-y-1/2" />
                   <input 
@@ -3823,8 +3938,19 @@ export default function App() {
                   className="bg-white border border-[#c7c4d8] rounded-lg py-2 px-3 text-xs outline-none focus:border-[#4f46e5] text-[#191c1e] font-semibold"
                 >
                   <option>Todas as Categorias</option>
-                  {CATEGORIES_LIST.map((cat, idx) => (
+                  {categoriesList.map((cat, idx) => (
                     <option key={idx} value={cat}>{cat}</option>
+                  ))}
+                </select>
+
+                <select 
+                  value={filterRegion} 
+                  onChange={(e) => setFilterRegion(e.target.value)}
+                  className="bg-white border border-[#c7c4d8] rounded-lg py-2 px-3 text-xs outline-none focus:border-[#4f46e5] text-[#191c1e] font-semibold"
+                >
+                  <option>Todas as Regiões</option>
+                  {availableRegions.map((reg, idx) => (
+                    <option key={idx} value={reg}>{reg}</option>
                   ))}
                 </select>
               </div>
@@ -3859,7 +3985,7 @@ export default function App() {
                                 {reg.category}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-xs font-mono text-[#777587]">{reg.date}</td>
+                            <td className="px-6 py-4 text-xs font-mono text-[#777587]">{formatCollectionDate(reg)}</td>
                             <td className="px-6 py-4 text-right">
                               <div className="inline-flex gap-1 justify-end">
                                 <button
@@ -3967,11 +4093,11 @@ export default function App() {
               </div>
 
               {/* High precision leaders statistic headers */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 
                 <div className="bg-white p-5 rounded-xl border border-[#eceef0] shadow-sm flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold text-[#777587] uppercase tracking-wider mb-1">Total de Lideranças</p>
+                    <p className="text-xs font-semibold text-[#777587] uppercase tracking-wider mb-1">Total de Usuários</p>
                     <h4 className="text-2xl font-bold text-[#191c1e]">{leaders.length}</h4>
                   </div>
                   <div className="w-10 h-10 rounded-lg bg-[#e2dfff] text-[#3323cc] flex items-center justify-center">
@@ -3981,23 +4107,11 @@ export default function App() {
 
                 <div className="bg-white p-5 rounded-xl border border-[#eceef0] shadow-sm flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold text-[#777587] uppercase tracking-wider mb-1">Lideranças Inativas</p>
+                    <p className="text-xs font-semibold text-[#777587] uppercase tracking-wider mb-1">Usuários Inativos</p>
                     <h4 className="text-2xl font-bold text-[#ba1a1a]">{inactiveLeadersCount}</h4>
                   </div>
                   <div className="w-10 h-10 rounded-lg bg-[#ffdad6] text-[#ba1a1a] flex items-center justify-center">
                     <Lock className="w-5 h-5" />
-                  </div>
-                </div>
-
-                <div className="bg-white p-5 rounded-xl border border-[#eceef0] shadow-sm flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-[#777587] uppercase tracking-wider mb-1">Cadastros Realizados</p>
-                    <h4 className="text-2xl font-bold text-[#3525cd]">
-                      {leaders.reduce((sum, current) => sum + current.registrationCount, 0)}
-                    </h4>
-                  </div>
-                  <div className="w-10 h-10 rounded-lg bg-[#e2dfff] text-[#3525cd] flex items-center justify-center">
-                    <TrendingUp className="w-5 h-5" />
                   </div>
                 </div>
 
@@ -4156,6 +4270,96 @@ export default function App() {
                           <Plus className="w-4 h-4 text-[#777587] group-hover:text-[#3525cd]" />
                         </button>
                       ))}
+                    </div>
+                  </div>
+
+                  {/* Dynamic Categories Editor Card */}
+                  <div className="bg-white rounded-2xl border border-[#eceef0] p-5 shadow-sm space-y-4 text-left">
+                    <h3 className="text-xs font-bold text-[#191c1e] uppercase tracking-wider flex items-center gap-2 border-b border-[#eceef0] pb-3">
+                      <Layers className="w-4 h-4 text-[#3525cd]" />
+                      <span>Gerenciar Categorias</span>
+                    </h3>
+                    
+                    {/* Category List */}
+                    <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
+                      {categoriesList.map((cat, index) => (
+                        <div 
+                          key={index} 
+                          className="flex items-center justify-between p-2 rounded-lg bg-[#f2f4f6]/60 border border-transparent hover:border-[#eceef0] transition-all group animate-fade-in text-left"
+                        >
+                          {editingCategoryIndex === index ? (
+                            <div className="flex items-center gap-2 w-full">
+                              <input 
+                                type="text"
+                                value={editingCategoryText}
+                                onChange={(e) => setEditingCategoryText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveEditCategory(index);
+                                  if (e.key === 'Escape') handleCancelEditCategory();
+                                }}
+                                className="flex-1 bg-white border border-[#3525cd] rounded px-2 py-1 text-xs outline-none font-semibold text-[#191c1e]"
+                                autoFocus
+                              />
+                              <button 
+                                onClick={() => handleSaveEditCategory(index)}
+                                className="p-1 hover:bg-[#dcfce7] hover:text-[#166534] text-[#3525cd] rounded transition-colors"
+                                title="Salvar"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={handleCancelEditCategory}
+                                className="p-1 hover:bg-red-50 hover:text-red-600 text-[#777587] rounded transition-colors"
+                                title="Cancelar"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-xs font-semibold text-[#191c1e] pl-1">{cat}</span>
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={() => handleStartEditCategory(index, cat)}
+                                  className="p-1 hover:bg-[#e2dfff]/40 text-[#3525cd] rounded transition-colors"
+                                  title="Editar"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteCategory(cat)}
+                                  className="p-1 hover:bg-red-50 text-[#ba1a1a] rounded transition-colors"
+                                  title="Excluir"
+                                  disabled={categoriesList.length <= 1}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Add Category Input */}
+                    <div className="flex items-center gap-1.5 pt-2 border-t border-[#eceef0]">
+                      <input 
+                        type="text"
+                        placeholder="Nova categoria..."
+                        value={newCategoryInput}
+                        onChange={(e) => setNewCategoryInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleAddCategory();
+                        }}
+                        className="flex-1 bg-[#f2f4f6] border border-transparent hover:border-[#eceef0] focus:border-[#3525cd] focus:bg-white rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-[#191c1e] placeholder-[#777587]"
+                      />
+                      <button 
+                        onClick={handleAddCategory}
+                        className="p-1.5 bg-[#3525cd] hover:bg-[#4f46e5] text-white rounded-lg transition-colors shadow-sm"
+                        title="Adicionar Novo"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -4365,10 +4569,6 @@ export default function App() {
                     <Users className="w-5 h-5 text-[#3525cd] group-hover:scale-110 transition-transform" />
                   </div>
                   <h3 className="text-3xl font-bold tracking-tight text-[#191c1e]">{filteredRegistrations.length}</h3>
-                  <span className="text-[#166534] text-[11px] font-bold mt-2 inline-flex items-center gap-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>+12.5% em relação ao planejado</span>
-                  </span>
                 </div>
 
                 <div 
@@ -4383,10 +4583,6 @@ export default function App() {
                     <Layers className="w-5 h-5 text-[#6366f1] group-hover:scale-110 transition-transform" />
                   </div>
                   <h3 className="text-3xl font-bold tracking-tight text-[#191c1e]">{leaders.length}</h3>
-                  <span className="text-[#6366f1] text-[11px] font-bold mt-2 inline-flex items-center gap-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>Gerenciar Lideranças</span>
-                  </span>
                 </div>
 
                 <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
@@ -4395,7 +4591,6 @@ export default function App() {
                     <Calendar className="w-5 h-5 text-[#7e3000]" />
                   </div>
                   <h3 className="text-3xl font-bold tracking-tight text-[#191c1e]">{filteredLeadsThisMonth}</h3>
-                  <span className="text-xs text-[#777587] mt-2">Meta Mensal de Período: 400</span>
                 </div>
 
                 <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
@@ -4404,10 +4599,6 @@ export default function App() {
                     <BarChart3 className="w-5 h-5 text-[#5b598c]" />
                   </div>
                   <h3 className="text-3xl font-bold tracking-tight text-[#191c1e]">{taxaConversao}%</h3>
-                  <span className="text-[#166534] text-[11px] font-bold mt-2 inline-flex items-center gap-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>Envolvimento de Líderes Ativos</span>
-                  </span>
                 </div>
 
                 <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
@@ -4442,7 +4633,7 @@ export default function App() {
               </div>
 
               {/* Advanced multi-select filtering tools with visual date selection */}
-              <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <div className="space-y-1">
                   <label className="block text-[11px] font-bold text-[#464555] uppercase tracking-wider">Data Inicial</label>
                   <div className="relative">
@@ -4482,15 +4673,29 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-[11px] font-bold text-[#464555] uppercase tracking-wider">Categoria de Atendimento</label>
+                  <label className="block text-[11px] font-bold text-[#464555] uppercase tracking-wider">Categoria</label>
                   <select 
                     value={filterCategory}
                     onChange={(e) => setFilterCategory(e.target.value)}
                     className="w-full bg-[#f2f4f6] text-xs py-2 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
                   >
                     <option>Todas as Categorias</option>
-                    {CATEGORIES_LIST.map((cat, idx) => (
+                    {categoriesList.map((cat, idx) => (
                       <option key={idx} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-[#464555] uppercase tracking-wider">Região</label>
+                  <select 
+                    value={filterRegion}
+                    onChange={(e) => setFilterRegion(e.target.value)}
+                    className="w-full bg-[#f2f4f6] text-xs py-2 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
+                  >
+                    <option>Todas as Regiões</option>
+                    {availableRegions.map((reg, idx) => (
+                      <option key={idx} value={reg}>{reg}</option>
                     ))}
                   </select>
                 </div>
@@ -4695,7 +4900,7 @@ export default function App() {
                       <div className="flex flex-col h-full justify-between">
                         <div>
                           <h3 className="text-sm font-bold text-[#191c1e] uppercase tracking-wider">Por Categoria</h3>
-                          <p className="text-[10px] text-[#777587] font-medium leading-tight mt-0.5">Participação volumétrica por categoria de atendimento.</p>
+                          <p className="text-[10px] text-[#777587] font-medium leading-tight mt-0.5">Participação volumétrica por categoria.</p>
                         </div>
                         
                         <div className="flex flex-col items-center justify-center space-y-4 py-4 my-auto">
@@ -4859,7 +5064,7 @@ export default function App() {
             <div className="space-y-8 animate-fade-in text-left">
               <div className="bg-white rounded-2xl overflow-hidden border border-[#eceef0] shadow-sm">
                 <div className="h-32 bg-gradient-to-r from-[#3525cd] to-[#4f46e5]" />
-                <div className="px-6 pb-6 flex flex-col md:flex-row items-end gap-6 -mt-12">
+                <div className="px-6 pb-6 flex flex-col md:flex-row items-center md:items-end gap-6 -mt-12">
                   <div className="relative">
                     <img 
                       src={profile.avatarUrl} 
@@ -4906,11 +5111,11 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Grid Layout profile data */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Profile configurations container (extended to 100% width) */}
+              <div className="w-full space-y-6">
                 
                 {/* Information inputs details */}
-                <div className="lg:col-span-2 space-y-6">
+                <div className="w-full space-y-6">
                   
                   <div className="bg-white p-6 rounded-2xl border border-[#eceef0] shadow-sm">
                     <h3 className="text-[#191c1e] text-sm font-bold uppercase tracking-wider mb-6 flex items-center gap-2.5">
@@ -5029,30 +5234,6 @@ export default function App() {
 
                 </div>
 
-                {/* Right widgets actions columns */}
-                <div className="space-y-6">
-                  <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm space-y-4 text-left">
-                    <h4 className="text-xs font-bold text-[#191c1e] uppercase tracking-wider mb-2">Ações Administrativas</h4>
-                    <button 
-                      onClick={() => {
-                        if (confirm('Deseja realmente redefinir todos os dados de simulação ao padrão de fábrica?')) {
-                          localStorage.clear();
-                          window.location.reload();
-                        }
-                      }}
-                      className="w-full text-center py-2.5 px-4 border border-[#c7c4d8] hover:bg-[#fee2e2] text-[#ba1a1a] hover:border-[#ba1a1a]/20 font-semibold text-xs rounded-lg transition-colors"
-                    >
-                      Restaurar Banco de Dados
-                    </button>
-                    <button 
-                      onClick={() => handleLogout()}
-                      className="w-full text-center py-2.5 px-4 bg-[#ba1a1a] text-white font-semibold text-xs rounded-lg hover:bg-red-700 transition-colors"
-                    >
-                      Excluir Conta Permanente
-                    </button>
-                  </div>
-                </div>
-
               </div>
             </div>
           )}
@@ -5093,13 +5274,13 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Categoria de Atendimento</label>
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Categoria</label>
                 <select 
                   value={newRegistrationCategory}
                   onChange={(e) => setNewRegistrationCategory(e.target.value)}
                   className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
                 >
-                  {CATEGORIES_LIST.map((cat, idx) => (
+                  {categoriesList.map((cat, idx) => (
                     <option key={idx} value={cat}>{cat}</option>
                   ))}
                 </select>
@@ -5210,7 +5391,7 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Categoria de Atendimento</span>
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Categoria</span>
                   <div>
                     <span className="inline-block bg-[#e2dfff] text-[#3323cc] text-xs font-bold font-mono px-3 py-1 rounded-full uppercase tracking-wider">
                       {viewingRegistration.category}
@@ -5241,7 +5422,7 @@ export default function App() {
 
                 <div className="space-y-1">
                   <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Data de Registro/Coleta</span>
-                  <p className="text-xs font-mono text-gray-600 bg-gray-50 p-2.5 rounded-lg border border-gray-100">{viewingRegistration.date}</p>
+                  <p className="text-xs font-mono text-gray-600 bg-gray-50 p-2.5 rounded-lg border border-gray-100">{formatCollectionDate(viewingRegistration)}</p>
                 </div>
               </div>
 
@@ -5315,16 +5496,16 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Categoria de Atendimento</label>
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Categoria</label>
                 <select 
                   value={editRegCategory}
                   onChange={(e) => setEditRegCategory(e.target.value)}
                   className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
                 >
-                  {editRegCategory && !CATEGORIES_LIST.includes(editRegCategory) && (
+                  {editRegCategory && !categoriesList.includes(editRegCategory) && (
                     <option value={editRegCategory}>{editRegCategory}</option>
                   )}
-                  {CATEGORIES_LIST.map((cat, idx) => (
+                  {categoriesList.map((cat, idx) => (
                     <option key={idx} value={cat}>{cat}</option>
                   ))}
                 </select>
