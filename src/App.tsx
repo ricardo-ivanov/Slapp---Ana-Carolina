@@ -61,7 +61,8 @@ import {
   deleteFormFieldFromDB,
   fetchCategoriesFromDB,
   upsertCategoryInDB,
-  deleteCategoryFromDB
+  deleteCategoryFromDB,
+  syncCategoriesInDB
 } from './supabaseClient';
 import {
   INITIAL_PROFILE,
@@ -267,6 +268,15 @@ export default function App() {
   const [dynamicFormInput, setDynamicFormInput] = useState<Record<string, string>>({});
   const [newRegistrationCategory, setNewRegistrationCategory] = useState(categoriesList[0] || 'Geral');
   const [newRegistrationLeader, setNewRegistrationLeader] = useState('');
+
+  // Keep newRegistrationCategory pointing to a valid loaded category when the list updates asynchronously
+  useEffect(() => {
+    if (categoriesList.length > 0) {
+      if (!newRegistrationCategory || !categoriesList.includes(newRegistrationCategory)) {
+        setNewRegistrationCategory(categoriesList[0]);
+      }
+    }
+  }, [categoriesList, newRegistrationCategory]);
 
   // New Leader Input
   const [newLeaderName, setNewLeaderName] = useState('');
@@ -526,9 +536,7 @@ export default function App() {
           if (dbCategories && dbCategories.length > 0) {
             setCategoriesList(dbCategories);
           } else {
-            for (let i = 0; i < CATEGORIES_LIST.length; i++) {
-              await upsertCategoryInDB(`c_${i}_${Date.now()}`, CATEGORIES_LIST[i]);
-            }
+            await syncCategoriesInDB(CATEGORIES_LIST);
             setCategoriesList(CATEGORIES_LIST);
           }
         } catch (error) {
@@ -573,19 +581,7 @@ export default function App() {
     if (!isSupabaseConnected || isLoadingFromSupabase || !isLoggedIn || !profile.isAdmin) return;
     const syncCategories = async () => {
       try {
-        const dbCategories = await fetchCategoriesFromDB();
-        if (dbCategories) {
-          for (const dbCat of dbCategories) {
-            if (!categoriesList.includes(dbCat)) {
-              await deleteCategoryFromDB(dbCat);
-            }
-          }
-        }
-        for (let i = 0; i < categoriesList.length; i++) {
-          const catName = categoriesList[i];
-          const catId = `cat_sync_${encodeURIComponent(catName)}`;
-          await upsertCategoryInDB(catId, catName);
-        }
+        await syncCategoriesInDB(categoriesList);
       } catch (err) {
         console.error('Failed to sync categories to Supabase:', err);
       }
@@ -2254,6 +2250,21 @@ export default function App() {
 
   const handleDeleteCategory = (catToDelete: string) => {
     setCategoriesList(categoriesList.filter(c => c !== catToDelete));
+    
+    // Auto-update any registrations that were in this deleted category so they don't lose history, moving them to another valid category or 'Outros'
+    const defaultFallback = categoriesList.find(c => c !== catToDelete) || 'Outros';
+    setRegistrations(prev => prev.map(r => r.category === catToDelete ? { ...r, category: defaultFallback } : r));
+
+    if (isSupabaseConnected && supabase) {
+      supabase
+        .from('registrations')
+        .update({ category: defaultFallback })
+        .eq('category', catToDelete)
+        .then(({ error }) => {
+          if (error) console.error('Error cascade-updating registrations after category delete:', error);
+        });
+    }
+
     triggerNotification('Categoria removida!', 'success');
   };
 
@@ -2277,6 +2288,16 @@ export default function App() {
     
     // Auto-update any registrations that were in this old category so they don't lose history
     setRegistrations(prev => prev.map(r => r.category === oldName ? { ...r, category: trimmed } : r));
+
+    if (isSupabaseConnected && supabase) {
+      supabase
+        .from('registrations')
+        .update({ category: trimmed })
+        .eq('category', oldName)
+        .then(({ error }) => {
+          if (error) console.error('Error cascade-updating registrations after category edit:', error);
+        });
+    }
 
     setEditingCategoryIndex(null);
     setEditingCategoryText('');

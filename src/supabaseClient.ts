@@ -445,3 +445,39 @@ export async function deleteCategoryFromDB(name: string): Promise<boolean> {
   }
 }
 
+export async function syncCategoriesInDB(categories: string[]): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    // 1. Delete all existing categories to prevent unique constraint crashes
+    const { error: deleteError } = await supabase
+      .from('categories')
+      .delete()
+      .neq('id', 'keep_none_of_them');
+    
+    if (deleteError) throw deleteError;
+
+    if (categories.length === 0) return true;
+
+    // 2. Perform bulk insert with sequential creation time to preserve ordering
+    const rows = categories.map((cat, i) => {
+      const timestamp = new Date();
+      timestamp.setSeconds(timestamp.getSeconds() + i);
+      return {
+        id: `c_${i}_${Date.now()}_${encodeURIComponent(cat).slice(0, 30)}`,
+        name: cat,
+        created_at: timestamp.toISOString()
+      };
+    });
+
+    const { error: insertError } = await supabase
+      .from('categories')
+      .insert(rows);
+
+    if (insertError) throw insertError;
+    return true;
+  } catch (err) {
+    console.error('Error in syncCategoriesInDB helper:', err);
+    return false;
+  }
+}
+
