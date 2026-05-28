@@ -4554,8 +4554,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 5 Cards indicator grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+              {/* 4 Cards indicator grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 
                 <div 
                   onClick={() => {
@@ -4591,14 +4591,6 @@ export default function App() {
                     <Calendar className="w-5 h-5 text-[#7e3000]" />
                   </div>
                   <h3 className="text-3xl font-bold tracking-tight text-[#191c1e]">{filteredLeadsThisMonth}</h3>
-                </div>
-
-                <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-bold text-[#464555] uppercase tracking-wider">Taxa de Conversão</span>
-                    <BarChart3 className="w-5 h-5 text-[#5b598c]" />
-                  </div>
-                  <h3 className="text-3xl font-bold tracking-tight text-[#191c1e]">{taxaConversao}%</h3>
                 </div>
 
                 <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
