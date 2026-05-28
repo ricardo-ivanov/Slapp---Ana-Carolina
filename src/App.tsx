@@ -60,8 +60,6 @@ import {
   upsertFormField,
   deleteFormFieldFromDB,
   fetchCategoriesFromDB,
-  upsertCategoryInDB,
-  deleteCategoryFromDB,
   syncCategoriesInDB
 } from './supabaseClient';
 import {
@@ -181,8 +179,7 @@ export default function App() {
   });
 
   const [categoriesList, setCategoriesList] = useState<string[]>(() => {
-    const stored = localStorage.getItem('admin_categories_list');
-    return stored ? JSON.parse(stored) : CATEGORIES_LIST;
+    return CATEGORIES_LIST;
   });
 
   const [newCategoryInput, setNewCategoryInput] = useState('');
@@ -198,6 +195,7 @@ export default function App() {
 
   const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
   const [isLoadingFromSupabase, setIsLoadingFromSupabase] = useState(false);
+  const [hasLoadedCategories, setHasLoadedCategories] = useState(false);
 
   // UI States
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -306,9 +304,8 @@ export default function App() {
     localStorage.setItem('admin_leaders', JSON.stringify(leaders));
     localStorage.setItem('admin_registrations', JSON.stringify(registrations));
     localStorage.setItem('admin_form_fields', JSON.stringify(formFields));
-    localStorage.setItem('admin_categories_list', JSON.stringify(categoriesList));
     localStorage.setItem('active_view', activeView);
-  }, [isLoggedIn, profile, leaders, registrations, formFields, categoriesList, activeView]);
+  }, [isLoggedIn, profile, leaders, registrations, formFields, activeView]);
 
   // Set default leader selection for new registrations
   useEffect(() => {
@@ -509,35 +506,66 @@ export default function App() {
           const finalLeaders = Array.from(uniqueMap.values()).sort((a, b) => a.name.localeCompare(b.name));
           setLeaders(finalLeaders);
 
-          // 3. Fetch Registrations
-          const dbRegs = await fetchRegistrations();
-          if (dbRegs && dbRegs.length > 0) {
-            setRegistrations(dbRegs);
+          // 3. Fetch Categories
+          const dbCategories = await fetchCategoriesFromDB();
+          let activeCategories = CATEGORIES_LIST;
+          if (dbCategories && dbCategories.length > 0) {
+            activeCategories = dbCategories;
+            setCategoriesList(dbCategories);
           } else {
-            for (const reg of INITIAL_REGISTRATIONS) {
-              await upsertRegistration(reg);
+            // No categories in single row yet. Only seed if user is an admin.
+            if (isLoggedIn && profile?.isAdmin) {
+              await syncCategoriesInDB(CATEGORIES_LIST);
             }
-            setRegistrations(INITIAL_REGISTRATIONS);
+            setCategoriesList(CATEGORIES_LIST);
+          }
+          setHasLoadedCategories(true);
+
+          // 4. Fetch Registrations
+          const dbRegs = await fetchRegistrations();
+          const defaultFallback = activeCategories.includes('Outros') ? 'Outros' : activeCategories[0];
+          if (dbRegs && dbRegs.length > 0) {
+            // Instantly harmonize registrations database entries with current live categories
+            const sanitizedRegs = dbRegs.map(r => {
+              if (!r.category || !activeCategories.includes(r.category)) {
+                const updated = { ...r, category: defaultFallback };
+                // Async cleanup in background - Only performed by admins to avoid race conditions
+                if (connected && isLoggedIn && profile?.isAdmin) {
+                  upsertRegistration(updated).catch(err => console.error('Error auto-migrating registration category:', err));
+                }
+                return updated;
+              }
+              return r;
+            });
+            setRegistrations(sanitizedRegs);
+          } else {
+            const seededRegs = INITIAL_REGISTRATIONS.map(r => {
+              if (!r.category || !activeCategories.includes(r.category)) {
+                return { ...r, category: defaultFallback };
+              }
+              return r;
+            });
+            // Only admins should seed initial registrations
+            if (isLoggedIn && profile?.isAdmin) {
+              for (const reg of seededRegs) {
+                await upsertRegistration(reg);
+              }
+            }
+            setRegistrations(seededRegs);
           }
 
-          // 4. Fetch Form Fields
+          // 5. Fetch Form Fields
           const dbFields = await fetchFormFields();
           if (dbFields && dbFields.length > 0) {
             setFormFields(dbFields);
           } else {
-            for (const field of INITIAL_FORM_FIELDS) {
-              await upsertFormField(field);
+            // Only seed if user is an admin
+            if (isLoggedIn && profile?.isAdmin) {
+              for (const field of INITIAL_FORM_FIELDS) {
+                await upsertFormField(field);
+              }
             }
             setFormFields(INITIAL_FORM_FIELDS);
-          }
-
-          // 5. Fetch Categories
-          const dbCategories = await fetchCategoriesFromDB();
-          if (dbCategories && dbCategories.length > 0) {
-            setCategoriesList(dbCategories);
-          } else {
-            await syncCategoriesInDB(CATEGORIES_LIST);
-            setCategoriesList(CATEGORIES_LIST);
           }
         } catch (error) {
           console.error('Failed to pre-seed/fetch database:', error);
@@ -576,9 +604,9 @@ export default function App() {
     syncFields();
   }, [formFields, isSupabaseConnected, isLoadingFromSupabase, isLoggedIn, profile.isAdmin]);
 
-  // Categories DB Synchronization Hook
+  // Categories DB Synchronization Hook (Requires initial load to complete to prevent accidental overwrites)
   useEffect(() => {
-    if (!isSupabaseConnected || isLoadingFromSupabase || !isLoggedIn || !profile.isAdmin) return;
+    if (!isSupabaseConnected || isLoadingFromSupabase || !isLoggedIn || !profile.isAdmin || !hasLoadedCategories) return;
     const syncCategories = async () => {
       try {
         await syncCategoriesInDB(categoriesList);
@@ -587,7 +615,7 @@ export default function App() {
       }
     };
     syncCategories();
-  }, [categoriesList, isSupabaseConnected, isLoadingFromSupabase, isLoggedIn, profile.isAdmin]);
+  }, [categoriesList, isSupabaseConnected, isLoadingFromSupabase, isLoggedIn, profile.isAdmin, hasLoadedCategories]);
 
   // Trigger brief alert banners
   const triggerNotification = (message: string, type: 'success' | 'info' | 'error' | 'warning' = 'success') => {

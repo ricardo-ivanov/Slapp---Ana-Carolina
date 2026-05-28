@@ -116,11 +116,13 @@ VALUES
 ('f4', 'select', 'Região / Setor', NULL, false, ARRAY['Regional Norte', 'Regional Sul', 'Regional Leste', 'Regional Oeste'])
 ON CONFLICT (id) DO NOTHING;
 
--- 5. CATEGORIES TABLE
-CREATE TABLE IF NOT EXISTS public.categories (
+-- 5. CATEGORIES TABLE (Singleton format: single row)
+DROP TABLE IF EXISTS public.categories CASCADE;
+
+CREATE TABLE public.categories (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    list TEXT[] NOT NULL DEFAULT '{}'::text[],
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Enable RLS for Categories
@@ -129,15 +131,16 @@ ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 -- Dynamic Policies for Categories
 CREATE POLICY "Allow all operations for public categories" ON public.categories FOR ALL USING (true) WITH CHECK (true);
 
--- Seed Initial Categories
-INSERT INTO public.categories (id, name)
-VALUES
-('c1', 'Alcoólicos Anônimos (AA)'),
-('c2', 'Dependentes Químicos'),
-('c3', 'Autistas'),
-('c4', 'Empreendedores'),
-('c5', 'Estudantes'),
-('c6', 'Saúde'),
-('c7', 'Outros')
+-- Seed Initial Categories as a Single Row
+INSERT INTO public.categories (id, list)
+VALUES ('singleton', ARRAY[
+  'Alcoólicos Anônimos (AA)',
+  'Dependentes Químicos',
+  'Autistas',
+  'Empreendedores',
+  'Estudantes',
+  'Saúde',
+  'Outros'
+])
 ON CONFLICT (id) DO NOTHING;
 

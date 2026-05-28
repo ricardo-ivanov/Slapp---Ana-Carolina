@@ -339,6 +339,7 @@ export async function fetchFormFields(): Promise<FormField[] | null> {
     const { data, error } = await supabase
       .from('form_fields')
       .select('*')
+      .neq('id', 'categories_list_data')
       .order('created_at', { ascending: true });
     if (error) throw error;
     return data.map((item: any) => ({
@@ -392,92 +393,168 @@ export async function deleteFormFieldFromDB(id: string): Promise<boolean> {
 }
 
 // ==========================================
-// CATEGORIES API HELPERS
+// CATEGORIES API HELPERS (Singleton & Schema-Agnostic Format)
 // ==========================================
 export async function fetchCategoriesFromDB(): Promise<string[] | null> {
   if (!supabase) return null;
+
+  // Primary: Fetch from 'form_fields' with ID 'categories_list_data' (our stable schema-agnostic singleton)
+  try {
+    const { data, error } = await supabase
+      .from('form_fields')
+      .select('options')
+      .eq('id', 'categories_list_data')
+      .maybeSingle();
+    
+    if (!error && data && Array.isArray(data.options)) {
+      return data.options;
+    }
+  } catch (err) {
+    // Fall through
+  }
+
+  // Fallback 1: Attempt new singleton format on separate table with 'list' (text[]) column
+  try {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('list')
+      .eq('id', 'singleton')
+      .maybeSingle();
+    
+    if (!error && data && Array.isArray(data.list)) {
+      return data.list;
+    }
+  } catch (err) {
+    // Fall through
+  }
+
+  // Fallback 2: Singleton format with JSON-stringified array in 'name' column
   try {
     const { data, error } = await supabase
       .from('categories')
       .select('name')
-      .order('created_at', { ascending: true });
-    
-    if (error) {
-      if (error.message && (error.message.includes('relation') || error.message.includes('does not exist'))) {
-        console.warn('Supabase categories table not found, fallback to localStorage.');
-        return null;
+      .eq('id', 'singleton')
+      .maybeSingle();
+
+    if (!error && data && data.name) {
+      const parsed = JSON.parse(data.name);
+      if (Array.isArray(parsed)) {
+        return parsed;
       }
-      throw error;
     }
-    return data.map((item: any) => item.name);
   } catch (err) {
-    console.warn('Error fetching categories from Supabase:', err);
-    return null;
+    // Fall through
   }
-}
 
-export async function upsertCategoryInDB(id: string, name: string): Promise<boolean> {
-  if (!supabase) return false;
+  // Fallback 3: Legacy multi-row format (each category is a separate row with name)
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('categories')
-      .upsert({ id, name });
-    if (error) throw error;
-    return true;
-  } catch (err) {
-    console.error('Error upserting category in Supabase:', err);
-    return false;
-  }
-}
+      .select('name')
+      .neq('id', 'singleton');
 
-export async function deleteCategoryFromDB(name: string): Promise<boolean> {
-  if (!supabase) return false;
-  try {
-    const { error } = await supabase
-      .from('categories')
-      .delete()
-      .eq('name', name);
-    if (error) throw error;
-    return true;
+    if (!error && data && data.length > 0) {
+      return data.map((item: any) => item.name).filter((n: any) => typeof n === 'string' && n.trim() !== '');
+    }
   } catch (err) {
-    console.error('Error deleting category from Supabase:', err);
-    return false;
+    // Fall through
   }
+
+  return null;
 }
 
 export async function syncCategoriesInDB(categories: string[]): Promise<boolean> {
   if (!supabase) return false;
+
+  // Primary: Upsert to 'form_fields' table with id 'categories_list_data' (guaranteed to succeed and sync)
   try {
-    // 1. Delete all existing categories to prevent unique constraint crashes
-    const { error: deleteError } = await supabase
-      .from('categories')
-      .delete()
-      .neq('id', 'keep_none_of_them');
+    const { error } = await supabase
+      .from('form_fields')
+      .upsert({
+        id: 'categories_list_data',
+        type: 'select',
+        label: 'Categorias do Sistema',
+        placeholder: 'system_categories',
+        required: false,
+        options: categories,
+        created_at: new Date().toISOString()
+      });
     
-    if (deleteError) throw deleteError;
+    if (!error) {
+      // Also try to update the 'categories' table in the background as a backup, in case it exists in some setups
+      supabase
+        .from('categories')
+        .upsert({ 
+          id: 'singleton', 
+          list: categories, 
+          updated_at: new Date().toISOString() 
+        })
+        .then(() => {})
+        .catch(() => {});
 
+      return true;
+    }
+  } catch (err) {
+    // Fall through
+  }
+
+  // Fallback 1: Upsert to 'singleton' row with 'list' column in separated categories table
+  try {
+    const { error } = await supabase
+      .from('categories')
+      .upsert({ 
+        id: 'singleton', 
+        list: categories, 
+        updated_at: new Date().toISOString() 
+      });
+      
+    if (!error) {
+      return true;
+    }
+  } catch (err) {
+    // Fall through
+  }
+
+  // Fallback 2: Upsert to 'singleton' row with JSON string in 'name' column
+  try {
+    const { error } = await supabase
+      .from('categories')
+      .upsert({
+        id: 'singleton',
+        name: JSON.stringify(categories)
+      });
+    
+    if (!error) {
+      return true;
+    }
+  } catch (err) {
+    // Fall through
+  }
+
+  // Fallback 3: Multi-row format fallback (delete all and bulk insert)
+  try {
+    // Delete any existing rows
+    await supabase.from('categories').delete().neq('id', 'keep_none');
+
+    // Insert each category mapping
     if (categories.length === 0) return true;
+    
+    const rows = categories.map((cat, i) => ({
+      id: `c_${i}_${Date.now()}`,
+      name: cat
+    }));
 
-    // 2. Perform bulk insert with sequential creation time to preserve ordering
-    const rows = categories.map((cat, i) => {
-      const timestamp = new Date();
-      timestamp.setSeconds(timestamp.getSeconds() + i);
-      return {
-        id: `c_${i}_${Date.now()}_${encodeURIComponent(cat).slice(0, 30)}`,
-        name: cat,
-        created_at: timestamp.toISOString()
-      };
-    });
-
-    const { error: insertError } = await supabase
+    const { error } = await supabase
       .from('categories')
       .insert(rows);
 
-    if (insertError) throw insertError;
-    return true;
+    if (!error) {
+      return true;
+    }
   } catch (err) {
-    console.error('Error in syncCategoriesInDB helper:', err);
-    return false;
+    console.error('All category sync attempts failed in syncCategoriesInDB:', err);
   }
+
+  return false;
 }
 
