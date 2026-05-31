@@ -72,6 +72,7 @@ import {
 } from './data';
 import { Registration, Leader, FormField, UserProfile, ActiveView } from './types';
 import { QRCodeImage } from './components/QRCodeImage';
+import { SearchableSelect } from './components/SearchableSelect';
 import QRCode from 'qrcode';
 
 function maskCPF(value: string): string {
@@ -1816,6 +1817,96 @@ export default function App() {
     }
   };
 
+  // Export Leaders list in Excel spreadsheet format
+  const handleExportLeaders = () => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const formattedDate = `${day}-${month}-${year}`;
+
+    const headers = [
+      'Nome da Liderança',
+      'E-mail Corporativo',
+      'CPF',
+      'Telefone/Contato',
+      'Nível de Usuário',
+      'Status',
+      'Cadastros Realizados'
+    ];
+
+    const filteredLeadersList = leaders.filter(l => l.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    const rows = filteredLeadersList.map(l => [
+      l.name || '',
+      l.email || '',
+      l.cpf || '',
+      l.phone || '',
+      l.isAdmin ? 'Administrador' : 'Liderança',
+      l.status || 'Ativo',
+      String(l.registrationCount || 0)
+    ]);
+
+    triggerNotification('Preparando arquivo de exportação de Lideranças em formato Excel...', 'info');
+
+    let htmlContent = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`;
+    htmlContent += `<head>`;
+    htmlContent += `<meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">`;
+    htmlContent += `<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Lideranças</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->`;
+    htmlContent += `<style>`;
+    htmlContent += `table { border-collapse: collapse; font-family: Calibri, Arial, sans-serif; }`;
+    htmlContent += `td { border: 0.5pt solid #eceef0; padding: 6px 12px; font-size: 11pt; color: #191c1e; }`;
+    htmlContent += `th { border: 0.5pt solid #eceef0; background-color: #f2f4f6; font-weight: bold; font-size: 11pt; text-align: left; padding: 8px 12px; color: #464555; }`;
+    htmlContent += `.title { font-size: 16pt; font-weight: bold; color: #181445; }`;
+    htmlContent += `.metric { font-weight: bold; font-size: 11pt; color: #3525cd; }`;
+    htmlContent += `.label { font-size: 11pt; color: #777587; }`;
+    htmlContent += `</style>`;
+    htmlContent += `</head>`;
+    htmlContent += `<body>`;
+    htmlContent += `<table>`;
+    
+    htmlContent += `<tr><td colspan="${headers.length}" class="title" style="border:none;">Relatório de Lideranças de Campo</td></tr>`;
+    htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Data de Emissão: <b>${formattedDate}</b></td></tr>`;
+    htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Total de Lideranças Listadas: <span class="metric">${filteredLeadersList.length}</span></td></tr>`;
+    htmlContent += `<tr><td colspan="${headers.length}" style="border:none; height:15px;"></td></tr>`;
+    
+    htmlContent += `<tr>`;
+    headers.forEach(h => {
+      htmlContent += `<th>${h}</th>`;
+    });
+    htmlContent += `</tr>`;
+    
+    rows.forEach(r => {
+      htmlContent += `<tr>`;
+      r.forEach(val => {
+        const escapedVal = String(val)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+        htmlContent += `<td>${escapedVal}</td>`;
+      });
+      htmlContent += `</tr>`;
+    });
+    
+    htmlContent += `</table>`;
+    htmlContent += `</body>`;
+    htmlContent += `</html>`;
+
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Relatório de Lideranças - ${formattedDate}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    triggerNotification('Planilha de Lideranças baixada com sucesso!', 'success');
+  };
+
   // Delete registration
   const handleDeleteRegistration = (id: string, name: string) => {
     const reg = registrations.find(r => r.id === id);
@@ -2936,17 +3027,13 @@ export default function App() {
                     <span className="text-xs font-bold text-[#4d44e3] uppercase tracking-wider">Selecione o Líder</span>
                   </div>
                   
-                  <select 
+                  <SearchableSelect
                     required
                     value={newRegistrationLeader}
-                    onChange={(e) => setNewRegistrationLeader(e.target.value)}
-                    className="w-full bg-white text-xs py-2.5 px-3 rounded-lg border border-gray-200 outline-none font-semibold text-[#191c1e] focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3]"
-                  >
-                    <option value="">Selecione quem é o seu líder responsável...</option>
-                    {leaders.filter(l => l.status === 'Ativo').map(l => (
-                      <option key={l.id} value={l.id}>{l.name} ({l.email})</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setNewRegistrationLeader(val)}
+                    placeholder="Selecione quem é o seu líder responsável..."
+                    options={leaders.filter(l => l.status === 'Ativo').map(l => ({ value: l.id, label: l.name, sublabel: l.email }))}
+                  />
                 </div>
               )}
             </div>
@@ -2955,16 +3042,13 @@ export default function App() {
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
                 Categoria<span className="text-red-500">*</span>
               </label>
-              <select 
+              <SearchableSelect
                 required
                 value={newRegistrationCategory}
-                onChange={(e) => setNewRegistrationCategory(e.target.value)}
-                className="w-full bg-gray-50 text-xs py-3 px-4 rounded-lg border border-gray-200 outline-none font-semibold text-gray-800 focus:bg-white focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] transition-colors"
-              >
-                {categoriesList.map((cat, idx) => (
-                  <option key={idx} value={cat}>{cat}</option>
-                ))}
-              </select>
+                onChange={(val) => setNewRegistrationCategory(val)}
+                placeholder="Selecione uma categoria..."
+                options={categoriesList}
+              />
             </div>
 
             <div className="h-[1px] bg-gray-100 my-4" />
@@ -2992,17 +3076,13 @@ export default function App() {
                       {field.label} {field.required && <span className="text-red-500">*</span>}
                     </label>
                     {field.type === 'select' ? (
-                      <select 
+                      <SearchableSelect
                         required={field.required}
                         value={dynamicFormInput[field.id] || ''}
-                        onChange={(e) => setDynamicFormInput({...dynamicFormInput, [field.id]: e.target.value})}
-                        className="w-full bg-gray-50 text-xs py-2.5 px-4 rounded-lg border border-gray-200 outline-none focus:bg-white focus:border-[#4d44e3] focus:ring-1 focus:ring-[#4d44e3] transition-colors text-gray-800"
-                      >
-                        <option value="">Selecione uma opção...</option>
-                        {field.options?.map((opt, i) => (
-                          <option key={i} value={opt}>{opt}</option>
-                        ))}
-                      </select>
+                        onChange={(val) => setDynamicFormInput({...dynamicFormInput, [field.id]: val})}
+                        placeholder="Selecione uma opção..."
+                        options={field.options || []}
+                      />
                     ) : (
                       <input 
                         type={field.type === 'email' ? 'email' : 'text'}
@@ -4219,6 +4299,14 @@ export default function App() {
                       className="w-full bg-white border border-[#c7c4d8] rounded-lg py-2 pl-10 pr-4 text-xs outline-none focus:border-[#4f46e5]"
                     />
                   </div>
+
+                  <button 
+                    onClick={handleExportLeaders}
+                    className="border border-[#c7c4d8] text-[#191c1e] bg-white hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-colors shrink-0"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Exportar Excel</span>
+                  </button>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -4506,7 +4594,18 @@ export default function App() {
                                 placeholder="Opções separadas por vírgula..."
                                 value={field.options?.join(', ') || ''}
                                 onChange={(e) => {
-                                  setFormFields(formFields.map(f => f.id === field.id ? { ...f, options: e.target.value.split(',').map(s => s.trim()) } : f));
+                                  setFormFields(formFields.map(f => f.id === field.id ? { ...f, options: e.target.value.split(',').map(s => s.trimStart()) } : f));
+                                }}
+                                onBlur={() => {
+                                  setFormFields(formFields.map(f => {
+                                    if (f.id === field.id && f.options) {
+                                      return {
+                                        ...f,
+                                        options: f.options.map(s => s.trim()).filter(Boolean)
+                                      };
+                                    }
+                                    return f;
+                                  }));
                                 }}
                                 className="text-xs text-[#3525cd] font-mono bg-[#f2f4f6] border border-transparent rounded px-2 py-1 outline-none w-full block mt-2"
                               />
@@ -5342,29 +5441,25 @@ export default function App() {
               
               <div>
                 <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Liderança de Campo Responsável</label>
-                <select 
+                <SearchableSelect
                   value={newRegistrationLeader}
-                  onChange={(e) => setNewRegistrationLeader(e.target.value)}
+                  onChange={(val) => setNewRegistrationLeader(val)}
                   disabled={!profile.isAdmin}
-                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e] disabled:opacity-75 disabled:cursor-not-allowed"
-                >
-                  {leaders.filter(l => profile.isAdmin || l.id === profile.id || l.email === profile.email).map(l => (
-                    <option key={l.id} value={l.id}>{l.name} ({l.email})</option>
-                  ))}
-                </select>
+                  placeholder="Selecione o líder responsável..."
+                  options={leaders
+                    .filter(l => profile.isAdmin || l.id === profile.id || l.email === profile.email)
+                    .map(l => ({ value: l.id, label: l.name, sublabel: l.email }))}
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Categoria</label>
-                <select 
+                <SearchableSelect
                   value={newRegistrationCategory}
-                  onChange={(e) => setNewRegistrationCategory(e.target.value)}
-                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
-                >
-                  {categoriesList.map((cat, idx) => (
-                    <option key={idx} value={cat}>{cat}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setNewRegistrationCategory(val)}
+                  placeholder="Selecione a categoria..."
+                  options={categoriesList}
+                />
               </div>
 
               {/* Dynamic Inputs mapped from Form Builder */}
@@ -5384,17 +5479,13 @@ export default function App() {
                         {field.label} {field.required && <span className="text-red-500">*</span>}
                       </label>
                       {field.type === 'select' ? (
-                        <select 
+                        <SearchableSelect
                           required={field.required}
                           value={dynamicFormInput[field.id] || ''}
-                          onChange={(e) => setDynamicFormInput({ ...dynamicFormInput, [field.id]: e.target.value })}
-                          className="w-full bg-[#f2f4f6] text-xs py-2 px-3 rounded-lg border border-[#eceef0] outline-none"
-                        >
-                          <option value="">Selecione uma opção...</option>
-                          {field.options?.map((opt, i) => (
-                            <option key={i} value={opt}>{opt}</option>
-                          ))}
-                        </select>
+                          onChange={(val) => setDynamicFormInput({ ...dynamicFormInput, [field.id]: val })}
+                          placeholder="Selecione uma opção..."
+                          options={field.options || []}
+                        />
                       ) : (
                         <input 
                           type={field.type === 'email' ? 'email' : 'text'}
@@ -5565,31 +5656,26 @@ export default function App() {
 
               <div>
                 <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Liderança de Campo Responsável</label>
-                <select 
+                <SearchableSelect
                   value={editRegLeaderId}
-                  onChange={(e) => setEditRegLeaderId(e.target.value)}
-                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
-                >
-                  {leaders.map(l => (
-                    <option key={l.id} value={l.id}>{l.name} ({l.email})</option>
-                  ))}
-                </select>
+                  onChange={(val) => setEditRegLeaderId(val)}
+                  placeholder="Selecione o líder responsável..."
+                  options={leaders.map(l => ({ value: l.id, label: l.name, sublabel: l.email }))}
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Categoria</label>
-                <select 
+                <SearchableSelect
                   value={editRegCategory}
-                  onChange={(e) => setEditRegCategory(e.target.value)}
-                  className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
-                >
-                  {editRegCategory && !categoriesList.includes(editRegCategory) && (
-                    <option value={editRegCategory}>{editRegCategory}</option>
-                  )}
-                  {categoriesList.map((cat, idx) => (
-                    <option key={idx} value={cat}>{cat}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setEditRegCategory(val)}
+                  placeholder="Selecione a categoria..."
+                  options={
+                    editRegCategory && !categoriesList.includes(editRegCategory)
+                      ? [editRegCategory, ...categoriesList]
+                      : categoriesList
+                  }
+                />
               </div>
 
               {formFields
@@ -5601,16 +5687,12 @@ export default function App() {
                         {field.label} {field.required && <span className="text-red-500">*</span>}
                       </label>
                       {field.type === 'select' ? (
-                        <select
+                        <SearchableSelect
                           value={editRegDynamicFields[field.id] || ''}
-                          onChange={(e) => setEditRegDynamicFields({ ...editRegDynamicFields, [field.id]: e.target.value })}
-                          className="w-full bg-[#f2f4f6] text-xs py-2.5 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
-                        >
-                          <option value="">Selecione...</option>
-                          {field.options?.map((opt, idx) => (
-                            <option key={idx} value={opt}>{opt}</option>
-                          ))}
-                        </select>
+                          onChange={(val) => setEditRegDynamicFields({ ...editRegDynamicFields, [field.id]: val })}
+                          placeholder="Selecione..."
+                          options={field.options || []}
+                        />
                       ) : (
                         <input
                           type={field.type === 'cpf' ? 'text' : field.type}
