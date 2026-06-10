@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS public.registrations (
     leader_id TEXT REFERENCES public.leaders(id) ON DELETE SET NULL,
     leader_name TEXT,
     date TEXT,
+    origem TEXT DEFAULT 'Rua',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     -- For storing arbitrary dynamic form inputs in a JSONB block
     dynamic_data JSONB DEFAULT '{}'::jsonb

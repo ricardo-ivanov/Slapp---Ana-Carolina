@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import {
@@ -40,7 +41,8 @@ import {
   Mail,
   LogIn,
   Menu,
-  Database
+  Database,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -205,6 +207,13 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddRegistrationModal, setShowAddRegistrationModal] = useState(false);
   const [showAddLeaderModal, setShowAddLeaderModal] = useState(false);
+  const [showImportCsvModal, setShowImportCsvModal] = useState(false);
+  const [importCsvFile, setImportCsvFile] = useState<File | null>(null);
+  const [importCsvOrigin, setImportCsvOrigin] = useState('Meta');
+  const [importCsvRows, setImportCsvRows] = useState<any[]>([]);
+  const [importCsvError, setImportCsvError] = useState('');
+  const [isCsvDragOver, setIsCsvDragOver] = useState(false);
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
   const [editingLeader, setEditingLeader] = useState<Leader | null>(null);
   const [viewingLeaderQR, setViewingLeaderQR] = useState<Leader | null>(null);
 
@@ -215,17 +224,25 @@ export default function App() {
   const [editRegName, setEditRegName] = useState('');
   const [editRegLeaderId, setEditRegLeaderId] = useState('');
   const [editRegCategory, setEditRegCategory] = useState('');
+  const [editRegOrigem, setEditRegOrigem] = useState('');
   const [editRegDynamicFields, setEditRegDynamicFields] = useState<Record<string, string>>({});
   const [performancePeriod, setPerformancePeriod] = useState<'Diário' | 'Semanal' | 'Mensal'>('Semanal');
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
 
   // Filter State in Reports Screen
-  const [filterPeriod, setFilterPeriod] = useState('01/05/2026 - 31/05/2026');
+  const [filterPeriod, setFilterPeriod] = useState('01/05/2026 - 31/12/2026');
   const [filterStartDate, setFilterStartDate] = useState('2026-05-01');
-  const [filterEndDate, setFilterEndDate] = useState('2026-05-31');
+  const [filterEndDate, setFilterEndDate] = useState(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  });
   const [filterLeader, setFilterLeader] = useState('Todas as Lideranças');
   const [filterCategory, setFilterCategory] = useState('Todas as Categorias');
   const [filterRegion, setFilterRegion] = useState('Todas as Regiões');
+  const [filterOrigem, setFilterOrigem] = useState('Todas as Origens');
 
   // Synchronize filterPeriod string with visual date selection
   useEffect(() => {
@@ -434,6 +451,28 @@ export default function App() {
             password: 'admin123'
           };
 
+          const defaultAdmin3: UserProfile = {
+            id: 'p_ricardo_gmail',
+            name: 'Ricardo Ivanov (Gmail)',
+            email: 'ricardoiva9@gmail.com',
+            phone: '(11) 99999-9999',
+            cpf: '000.000.009-99',
+            avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=256',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
+          const defaultAdmin4: UserProfile = {
+            id: 'p_slapp',
+            name: 'Slapp Comunicações',
+            email: 'contato@slapp.com.br',
+            phone: '(11) 97777-7777',
+            cpf: '000.000.000-01',
+            avatarUrl: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=256',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
           // 1. Seed profiles to Supabase if they are missing
           const p1Db = await fetchProfile('p1');
           if (!p1Db) {
@@ -442,6 +481,14 @@ export default function App() {
           const pRDb = await fetchProfile('p_ricardo');
           if (!pRDb) {
             await upsertProfile('p_ricardo', defaultAdmin2);
+          }
+          const pRDb2 = await fetchProfile('p_ricardo_gmail');
+          if (!pRDb2) {
+            await upsertProfile('p_ricardo_gmail', defaultAdmin3);
+          }
+          const pRDb3 = await fetchProfile('p_slapp');
+          if (!pRDb3) {
+            await upsertProfile('p_slapp', defaultAdmin4);
           }
 
           // Update active profile if logged in
@@ -479,6 +526,32 @@ export default function App() {
             password: 'admin123'
           };
 
+          const adminLeader3: Leader = {
+            id: 'p_ricardo_gmail',
+            name: 'Ricardo Ivanov (Gmail)',
+            email: 'ricardoiva9@gmail.com',
+            phone: '(11) 99999-9999',
+            cpf: '000.000.009-99',
+            avatarUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=256',
+            registrationCount: 0,
+            status: 'Ativo',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
+          const adminLeader4: Leader = {
+            id: 'p_slapp',
+            name: 'Slapp Comunicações',
+            email: 'contato@slapp.com.br',
+            phone: '(11) 97777-7777',
+            cpf: '000.000.000-01',
+            avatarUrl: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=256',
+            registrationCount: 0,
+            status: 'Ativo',
+            isAdmin: true,
+            password: 'admin123'
+          };
+
           const dbLeaders = await fetchLeaders();
           let mergedList: Leader[] = dbLeaders || [];
 
@@ -490,6 +563,14 @@ export default function App() {
           if (!mergedList.some(l => l.email === adminLeader2.email)) {
             await upsertLeader(adminLeader2);
             mergedList.push(adminLeader2);
+          }
+          if (!mergedList.some(l => l.email === adminLeader3.email)) {
+            await upsertLeader(adminLeader3);
+            mergedList.push(adminLeader3);
+          }
+          if (!mergedList.some(l => l.email === adminLeader4.email)) {
+            await upsertLeader(adminLeader4);
+            mergedList.push(adminLeader4);
           }
 
           // Ensure default leaders are present and seeded
@@ -1017,6 +1098,397 @@ export default function App() {
     triggerNotification('Configuração do campo salva!', 'success');
   };
 
+  // Parser for CSV structure with headers (Nome, E-mail, telefone)
+  const parseCSV = (text: string) => {
+    // Strip BOM and any leading whitespace/unicode garbage
+    let cleanText = text.replace(/^\uFEFF/, '').trim();
+    if (cleanText.charCodeAt(0) === 0xFEFF || cleanText.charCodeAt(0) === 65279) {
+      cleanText = cleanText.substring(1).trim();
+    }
+    const lines = cleanText.split(/\r?\n/).filter(line => line.trim() !== '');
+    if (lines.length < 2) {
+      return { success: false, error: 'O arquivo CSV está vazio ou não possui registros.' };
+    }
+
+    // Helper to strip outer quotes if they only wrap the whole line as a single string
+    const cleanLineOfOuterQuotes = (rawLine: string): string => {
+      const trimmed = rawLine.trim();
+      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        const quoteCount = (trimmed.match(/"/g) || []).length;
+        if (quoteCount === 2) {
+          return trimmed.slice(1, -1).trim();
+        }
+      }
+      if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+        const quoteCount = (trimmed.match(/'/g) || []).length;
+        if (quoteCount === 2) {
+          return trimmed.slice(1, -1).trim();
+        }
+      }
+      return rawLine;
+    };
+
+    // Detect semicolon vs comma vs tab
+    const firstLine = cleanLineOfOuterQuotes(lines[0]);
+    let delimiter = ',';
+    if (firstLine.includes(';')) {
+      delimiter = ';';
+    } else if (firstLine.includes('\t')) {
+      delimiter = '\t';
+    }
+
+    // Parse headers and clean quotes, spaces, and invisible characters
+    const headers = firstLine.split(delimiter).map(h => {
+      let cleaned = h.replace(/^["']|["']$/g, '').trim();
+      // Remove any non-printable characters or zero-width spaces/BOM
+      cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
+      return cleaned;
+    });
+
+    // Find index of required columns: Nome, E-mail, telefone with extremely lenient matches
+    const nameIdx = headers.findIndex(h => {
+      const l = h.toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .trim();
+      return l === 'nome' || l === 'name' || l === 'nomecompleto' || l.includes('nom') || l.includes('nam');
+    });
+
+    const emailIdx = headers.findIndex(h => {
+      const l = h.toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .trim();
+      return l === 'email' || l === 'mail' || l.includes('mail');
+    });
+
+    const phoneIdx = headers.findIndex(h => {
+      const l = h.toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .trim();
+      return l === 'telefone' || l === 'phone' || l === 'celular' || l === 'tel' || l === 'contato' || l.includes('fon') || l.includes('cel') || l.includes('tel') || l.includes('con');
+    });
+
+    const missing: string[] = [];
+    if (nameIdx === -1) missing.push('Nome');
+    if (emailIdx === -1) missing.push('E-mail');
+    if (phoneIdx === -1) missing.push('telefone');
+
+    if (missing.length > 0) {
+      return {
+        success: false,
+        error: `Campos obrigatórios ausentes no cabeçalho do CSV: ${missing.join(', ')}. Certifique-se de que o CSV possui as colunas "Nome", "E-mail" e "telefone".`
+      };
+    }
+
+    const parsedRows: Array<{ nome: string; email: string; telefone: string }> = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = cleanLineOfOuterQuotes(lines[i]);
+      const values: string[] = [];
+      let currentVal = '';
+      let insideQuotes = false;
+      for (let j = 0; j < line.length; j++) {
+        const char = line[j];
+        if (char === '"' || char === "'") {
+          insideQuotes = !insideQuotes;
+        } else if (char === delimiter && !insideQuotes) {
+          values.push(currentVal.trim().replace(/^["']|["']$/g, ''));
+          currentVal = '';
+        } else {
+          currentVal += char;
+        }
+      }
+      values.push(currentVal.trim().replace(/^["']|["']$/g, ''));
+
+      // Ensure we have enough columns
+      while (values.length < headers.length) {
+        values.push('');
+      }
+
+      const nVal = values[nameIdx] || '';
+      const eVal = values[emailIdx] || '';
+      const pVal = values[phoneIdx] || '';
+
+      if (nVal.trim() && eVal.trim() && pVal.trim()) {
+        parsedRows.push({
+          nome: nVal.trim(),
+          email: eVal.trim(),
+          telefone: pVal.trim()
+        });
+      }
+    }
+
+    if (parsedRows.length === 0) {
+      return {
+        success: false,
+        error: 'Nenhum contato com todos os campos preenchidos (Nome, E-mail, telefone) foi encontrado no arquivo.'
+      };
+    }
+
+    return { success: true, rows: parsedRows };
+  };
+
+  const handleCsvFileChange = (file: File) => {
+    setImportCsvFile(file);
+    setImportCsvError('');
+    
+    // Check if the file is an Excel spreadsheet (.xlsx, .xls)
+    const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+    
+    if (isExcel) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = XLSX.utils.sheet_to_json<any>(worksheet, { header: 1 });
+          
+          if (jsonData.length === 0) {
+            setImportCsvError('O arquivo Excel está vazio.');
+            setImportCsvRows([]);
+            return;
+          }
+
+          // Headers are in the first row
+          const rawHeaders = (jsonData[0] as any[]) || [];
+          if (rawHeaders.length === 0) {
+            setImportCsvError('Nenhum cabeçalho encontrado no arquivo Excel.');
+            setImportCsvRows([]);
+            return;
+          }
+
+          const headers = rawHeaders.map(h => {
+            let cleaned = String(h || '').trim();
+            // Remove zero-width spaces/BOM
+            cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
+            return cleaned;
+          });
+
+          // Lenient column matching: Name, Email, Phone
+          const nameIdx = headers.findIndex(h => {
+            const l = h.toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9]/g, '')
+              .trim();
+            return l === 'nome' || l === 'name' || l === 'nomecompleto' || l.includes('nom') || l.includes('nam');
+          });
+
+          const emailIdx = headers.findIndex(h => {
+            const l = h.toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9]/g, '')
+              .trim();
+            return l === 'email' || l === 'mail' || l.includes('mail');
+          });
+
+          const phoneIdx = headers.findIndex(h => {
+            const l = h.toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .replace(/[^a-z0-9]/g, '')
+              .trim();
+            return l === 'telefone' || l === 'phone' || l === 'celular' || l === 'tel' || l === 'contato' || l.includes('fon') || l.includes('cel') || l.includes('tel') || l.includes('con');
+          });
+
+          const missing: string[] = [];
+          if (nameIdx === -1) missing.push('Nome');
+          if (emailIdx === -1) missing.push('E-mail');
+          if (phoneIdx === -1) missing.push('telefone');
+
+          if (missing.length > 0) {
+            setImportCsvError(`Campos obrigatórios ausentes no cabeçalho do Excel: ${missing.join(', ')}. Certifique-se de que a planilha possui as colunas "Nome", "E-mail" e "telefone".`);
+            setImportCsvRows([]);
+            return;
+          }
+
+          const parsedRows: Array<{ nome: string; email: string; telefone: string }> = [];
+
+          for (let i = 1; i < jsonData.length; i++) {
+            const rowValues = jsonData[i] as any[];
+            if (!rowValues || rowValues.length === 0) continue;
+
+            const nVal = String(rowValues[nameIdx] || '').trim();
+            const eVal = String(rowValues[emailIdx] || '').trim();
+            const pVal = String(rowValues[phoneIdx] || '').trim();
+
+            if (nVal && eVal && pVal) {
+              parsedRows.push({
+                nome: nVal,
+                email: eVal,
+                telefone: pVal
+              });
+            }
+          }
+
+          if (parsedRows.length === 0) {
+            setImportCsvError('Nenhum contato com todos os campos preenchidos (Nome, E-mail, telefone) foi encontrado na planilha.');
+            setImportCsvRows([]);
+          } else {
+            setImportCsvRows(parsedRows);
+          }
+        } catch (err) {
+          console.error("Error parsing Excel:", err);
+          setImportCsvError('Erro na leitura do arquivo Excel. Verifique se o formato está correto.');
+          setImportCsvRows([]);
+        }
+      };
+      reader.onerror = () => {
+        setImportCsvError('Erro ao carregar o arquivo Excel.');
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) {
+        setImportCsvError('Não foi possível ler o arquivo.');
+        return;
+      }
+      
+      // Auto-detect if file was written with Portuguese ISO-8859-1 / Windows-1252 (very common in Excel CSV exports)
+      // by looking for the Unicode replacement character ('') or parsing directly
+      if (text.includes('')) {
+        const encodingReader = new FileReader();
+        encodingReader.onload = (encodingEvent) => {
+          const latinText = encodingEvent.target?.result as string;
+          processCsvText(latinText);
+        };
+        encodingReader.onerror = () => {
+          setImportCsvError('Erro ao ler arquivo com codificação alternativa.');
+        };
+        encodingReader.readAsText(file, 'ISO-8859-1');
+      } else {
+        processCsvText(text);
+      }
+    };
+    
+    const processCsvText = (csvText: string) => {
+      const res = parseCSV(csvText);
+      if (!res.success) {
+        setImportCsvError(res.error || 'Erro na leitura do arquivo CSV.');
+        setImportCsvRows([]);
+      } else {
+        setImportCsvRows(res.rows || []);
+      }
+    };
+
+    reader.onerror = () => {
+      setImportCsvError('Erro ao carregar o arquivo CSV.');
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const handleImportCsvSubmit = () => {
+    if (importCsvRows.length === 0) {
+      triggerNotification('Nenhum dado válido para importar!', 'warning');
+      return;
+    }
+
+    // Match the leadership (target leader)
+    // "Todos os contatos importados devem ter o selo de Liderança do usuário administrador "Slapp Comunicações" ou caso o usuário admin "Slapp Comunicações" seja removido, atribuir para Ana Carolina Oliveira."
+    let targetLeader = leaders.find(l => l.name.trim().toLowerCase() === 'slapp comunicações');
+    if (!targetLeader) {
+      // Look for Ana Carolina Oliveira
+      targetLeader = leaders.find(l => l.name.trim().toLowerCase().includes('ana carolina') || l.email.trim().toLowerCase().includes('ana.carolina'));
+    }
+
+    // Fallback if neither is found
+    if (!targetLeader) {
+      targetLeader = {
+        id: 'l_fallback_ana',
+        name: 'Ana Carolina Oliveira',
+        email: 'ana.carolina@lideranca.com',
+        avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
+        registrationCount: 0,
+        status: 'Ativo',
+        phone: '(11) 98765-4321',
+        isAdmin: true
+      } as Leader;
+      if (!leaders.some(l => l.id === targetLeader!.id || l.name === targetLeader!.name)) {
+        setLeaders(prev => [...prev, targetLeader!]);
+      }
+    }
+
+    // Calculate dates
+    const nowStr = new Date();
+    const dDay = String(nowStr.getDate()).padStart(2, '0');
+    const dMonth = String(nowStr.getMonth() + 1).padStart(2, '0');
+    const dYear = nowStr.getFullYear();
+    const dHours = String(nowStr.getHours()).padStart(2, '0');
+    const dMinutes = String(nowStr.getMinutes()).padStart(2, '0');
+    const formattedColDate = `${dDay}/${dMonth}/${dYear} - ${dHours}:${dMinutes}`;
+
+    // Look up email & phone field mapping from dynamic form fields
+    const nameField = formFields.find(f => f.id === 'f1') || formFields[0];
+    const emailField = formFields.find(f => f.type === 'email' || f.label.toLowerCase().includes('e-mail') || f.label.toLowerCase().includes('email'));
+    const phoneField = formFields.find(f => f.type === 'tel' || f.label.toLowerCase().includes('fone') || f.label.toLowerCase().includes('telefone') || f.label.toLowerCase().includes('celular'));
+
+    const newRegs: Registration[] = importCsvRows.map((row, idx) => {
+      const dynamicInput: Record<string, string> = {};
+      if (nameField) {
+        dynamicInput[nameField.id] = row.nome;
+      }
+      if (emailField) {
+        dynamicInput[emailField.id] = row.email;
+      }
+      if (phoneField) {
+        dynamicInput[phoneField.id] = row.telefone;
+      }
+
+      return {
+        id: 'reg_csv_' + Date.now() + '_' + idx,
+        name: row.nome,
+        category: 'Outro', // default categorized as 'Outro'
+        leaderId: targetLeader!.id,
+        leaderName: targetLeader!.name,
+        date: formattedColDate,
+        createdAt: new Date().toISOString(),
+        origem: importCsvOrigin,
+        email: row.email,
+        phone: row.telefone,
+        ...dynamicInput
+      };
+    });
+
+    // Update leaders listing count state
+    const updatedLeaders = leaders.map(l => l.id === targetLeader!.id ? { ...l, registrationCount: l.registrationCount + newRegs.length } : l);
+    setLeaders(updatedLeaders);
+
+    // Save state
+    setRegistrations(prev => [...newRegs, ...prev]);
+
+    // Save Supabase DB Sync
+    if (isSupabaseConnected) {
+      // First, upsert target leader to ensure no foreign key violation occurs in the registrations table
+      upsertLeader({ ...targetLeader!, registrationCount: targetLeader!.registrationCount + newRegs.length })
+        .then(() => {
+          newRegs.forEach(reg => {
+            upsertRegistration(reg).catch(err => console.error("Error upserting imported registration:", err));
+          });
+        })
+        .catch(err => console.error("Failed to upsert target leader for CSV registrations:", err));
+    }
+
+    triggerNotification(`${newRegs.length} contatos importados com sucesso para ${targetLeader!.name}!`, 'success');
+
+    // Reset and close
+    setImportCsvFile(null);
+    setImportCsvRows([]);
+    setImportCsvError('');
+    setShowImportCsvModal(false);
+  };
+
   // Submit dynamic registration form
   const submitNewRegistration = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1071,6 +1543,7 @@ export default function App() {
       leaderName: selectedLeaderObj.name,
       date: formattedColDate,
       createdAt: new Date().toISOString(),
+      origem: 'Rua',
       ...dynamicFormInput
     };
 
@@ -1113,6 +1586,7 @@ export default function App() {
       'Nome Completo',
       'Liderança Associada',
       'Categoria Cadastrada',
+      'Origem',
       'Período de Entrada',
       ...dynamicFields.map(f => f.label)
     ];
@@ -1122,6 +1596,7 @@ export default function App() {
         reg.name || '',
         reg.leaderName || '',
         reg.category || '',
+        reg.origem || reg.Origem || 'Rua',
         formatCollectionDate(reg),
         ...dynamicFields.map(f => reg[f.id] !== undefined && reg[f.id] !== null ? String(reg[f.id]) : '')
       ];
@@ -1148,6 +1623,15 @@ export default function App() {
           return `${r.region}: ${r.count} (${pct}%)`;
         }).join('  |  ');
 
+      // Calculate percentages for origens with count > 0
+      const origensTotal = origensWithCount.reduce((sum, o) => sum + o.count, 0) || filteredCount || 1;
+      const origensText = origensWithCount
+        .filter(o => o.count > 0)
+        .map(o => {
+          const pct = ((o.count / origensTotal) * 100).toFixed(1);
+          return `${o.origem}: ${o.count} (${pct}%)`;
+        }).join('  |  ');
+
       // Prepare HTML Spreadsheet structured data for Excel
       let htmlContent = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">`;
       htmlContent += `<head>`;
@@ -1172,6 +1656,7 @@ export default function App() {
       htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Total de Cadastros Filtrados: <span class="metric">${filteredCount}</span></td></tr>`;
       htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Distribuição por Categoria: <span class="metric">${categoriesText || 'Nenhum'}</span></td></tr>`;
       htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Distribuição por Região: <span class="metric">${regionsText || 'Nenhum'}</span></td></tr>`;
+      htmlContent += `<tr><td colspan="${headers.length}" class="label" style="border:none;">Distribuição por Origem: <span class="metric">${origensText || 'Nenhum'}</span></td></tr>`;
       htmlContent += `<tr><td colspan="${headers.length}" style="border:none; height:15px;"></td></tr>`;
       
       // Header values
@@ -1233,13 +1718,22 @@ export default function App() {
           return `${r.region}: ${r.count} (${pct}%)`;
         }).join('  |  ');
 
+      const origensTotal = origensWithCount.reduce((sum, o) => sum + o.count, 0) || filteredCount || 1;
+      const origensText = origensWithCount
+        .filter(o => o.count > 0)
+        .map(o => {
+          const pct = ((o.count / origensTotal) * 100).toFixed(1);
+          return `${o.origem}: ${o.count} (${pct}%)`;
+        }).join('  |  ');
+
       // CSV needs semicolon as field separator for Excel compatibility in Portuguese
       let csvContent = `Relatório de Cadastros - Ana Carolina Oliveira\r\n`;
       csvContent += `Data do Relatório;${formattedDate}\r\n`;
       csvContent += `Total Geral de Cadastros;${totalCount}\r\n`;
       csvContent += `Total de Cadastros Filtrados;${filteredCount}\r\n`;
       csvContent += `Distribuição por Categoria;${categoriesText || 'Nenhum'}\r\n`;
-      csvContent += `Distribuição por Região;${regionsText || 'Nenhum'}\r\n\r\n`;
+      csvContent += `Distribuição por Região;${regionsText || 'Nenhum'}\r\n`;
+      csvContent += `Distribuição por Origem;${origensText || 'Nenhum'}\r\n\r\n`;
 
       csvContent += headers.map(h => `"${h.replace(/"/g, '""')}"`).join(';') + '\r\n';
       
@@ -1618,6 +2112,9 @@ export default function App() {
       const regionDataForPie = regionsWithCount.map(r => ({ label: r.region, count: r.count }));
       const totalRegion = regionDataForPie.reduce((acc, r) => acc + r.count, 0);
 
+      const origemDataForPie = origensWithCount.map(o => ({ label: o.origem, count: o.count }));
+      const totalOrigem = origemDataForPie.reduce((acc, o) => acc + o.count, 0);
+
       const leadersDataForBar = leaders.map(l => {
         const cnt = registrations.filter(r => r.leaderId === l.id || r.leaderName === l.name).length;
         return { name: l.name, count: cnt };
@@ -1717,11 +2214,14 @@ export default function App() {
 
             <table style="width: 100%; border-collapse: collapse; margin-top: 25px; table-layout: fixed;">
               <tr>
-                <td style="width: 50%; padding-right: 10px; vertical-align: top; box-sizing: border-box;">
+                <td style="width: 33.3%; padding-right: 8px; vertical-align: top; box-sizing: border-box;">
                   ${buildSvgPieChart(categoryDataForPie, totalCategory, 'Participação por Categoria')}
                 </td>
-                <td style="width: 50%; padding-left: 10px; vertical-align: top; box-sizing: border-box;">
+                <td style="width: 33.3%; padding-left: 4px; padding-right: 4px; vertical-align: top; box-sizing: border-box;">
                   ${buildSvgPieChart(regionDataForPie, totalRegion, 'Distribuição por Região')}
+                </td>
+                <td style="width: 33.3%; padding-left: 8px; vertical-align: top; box-sizing: border-box;">
+                  ${buildSvgPieChart(origemDataForPie, totalOrigem, 'Origem do Contato')}
                 </td>
               </tr>
             </table>
@@ -1958,6 +2458,7 @@ export default function App() {
     setEditRegName(reg.name);
     setEditRegLeaderId(reg.leaderId);
     setEditRegCategory(reg.category);
+    setEditRegOrigem(reg.origem || reg.Origem || 'Rua');
     
     const dynamicVals: Record<string, string> = {};
     formFields.forEach(f => {
@@ -2000,7 +2501,8 @@ export default function App() {
         name: editRegName,
         leaderId: selectedLeaderObj.id,
         leaderName: selectedLeaderObj.name,
-        category: editRegCategory
+        category: editRegCategory,
+        origem: editRegOrigem
       };
       setRegistrations(registrations.map(r => r.id === editingRegistration.id ? updatedReg : r));
 
@@ -2431,11 +2933,22 @@ export default function App() {
 
   // Support for role-based restricted access (Liderança vs. Admin)
   const visibleRegistrations = useMemo(() => {
+    let list = registrations;
     if (isLoggedIn && !profile.isAdmin) {
       // Leaders can only view registrations made by them
-      return registrations.filter(r => r.leaderId === profile.id || r.leaderName === profile.name || r.leaderEmail === profile.email);
+      list = registrations.filter(r => r.leaderId === profile.id || r.leaderName === profile.name || r.leaderEmail === profile.email);
+      
+      // "Apenas usuários administradores deverão visualizar os contatos importados."
+      const importOrigins = ['Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro'];
+      list = list.filter(r => {
+        const originVal = r.origem || r.Origem;
+        if (originVal && importOrigins.includes(originVal)) {
+          return false;
+        }
+        return true;
+      });
     }
-    return registrations;
+    return list;
   }, [registrations, isLoggedIn, profile.isAdmin, profile.id, profile.name, profile.email]);
 
   // Helper to determine registration region dynamically with fallback matching
@@ -2476,6 +2989,18 @@ export default function App() {
     return Array.from(regionsSet);
   }, [formFields, registrations]);
 
+  // Get active list of origens
+  const availableOrigens = useMemo(() => {
+    const origensSet = new Set<string>();
+    const defaultOrigins = ['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro'];
+    defaultOrigins.forEach(o => origensSet.add(o));
+    registrations.forEach(r => {
+      const oVal = r.origem || r.Origem;
+      if (oVal) origensSet.add(oVal);
+    });
+    return Array.from(origensSet);
+  }, [registrations]);
+
   // Dynamic values based on filters in Reports screen
   const filteredRegistrations = visibleRegistrations.filter(r => {
     const query = searchQuery.toLowerCase().trim();
@@ -2484,6 +3009,7 @@ export default function App() {
     const leaderMatch = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
     const categoryMatch = filterCategory === 'Todas as Categorias' || r.category.includes(filterCategory);
     const regionMatch = filterRegion === 'Todas as Regiões' || getRegistrationRegion(r) === filterRegion;
+    const origemMatch = filterOrigem === 'Todas as Origens' || (r.origem || r.Origem || 'Rua') === filterOrigem;
 
     // Filter by Date period
     let dateMatch = true;
@@ -2498,7 +3024,7 @@ export default function App() {
       }
     }
 
-    return queryMatch && leaderMatch && categoryMatch && regionMatch && dateMatch;
+    return queryMatch && leaderMatch && categoryMatch && regionMatch && origemMatch && dateMatch;
   });
 
   // KPI aggregates
@@ -2614,6 +3140,8 @@ export default function App() {
           const regDate = new Date(r.createdAt);
           const matchesLeader = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
           const matchesCategory = filterCategory === 'Todas as Categorias' || r.category === filterCategory;
+          const matchesRegion = filterRegion === 'Todas as Regiões' || getRegistrationRegion(r) === filterRegion;
+          const matchesOrigem = filterOrigem === 'Todas as Origens' || (r.origem || r.Origem || 'Rua') === filterOrigem;
           
           let matchesGlobalDate = true;
           if (filterStartDate) {
@@ -2628,7 +3156,7 @@ export default function App() {
           const matchesInterval = regDate.getDate() === d.getDate() &&
                                   regDate.getMonth() === d.getMonth() &&
                                   regDate.getFullYear() === d.getFullYear();
-          return matchesLeader && matchesCategory && matchesGlobalDate && matchesInterval;
+          return matchesLeader && matchesCategory && matchesRegion && matchesOrigem && matchesGlobalDate && matchesInterval;
         }).length;
         
         points.push({
@@ -2663,6 +3191,8 @@ export default function App() {
           const regDate = new Date(r.createdAt);
           const matchesLeader = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
           const matchesCategory = filterCategory === 'Todas as Categorias' || r.category === filterCategory;
+          const matchesRegion = filterRegion === 'Todas as Regiões' || getRegistrationRegion(r) === filterRegion;
+          const matchesOrigem = filterOrigem === 'Todas as Origens' || (r.origem || r.Origem || 'Rua') === filterOrigem;
           
           let matchesGlobalDate = true;
           if (filterStartDate) {
@@ -2675,7 +3205,7 @@ export default function App() {
           }
 
           const matchesInterval = regDate >= start && regDate <= end;
-          return matchesLeader && matchesCategory && matchesGlobalDate && matchesInterval;
+          return matchesLeader && matchesCategory && matchesRegion && matchesOrigem && matchesGlobalDate && matchesInterval;
         }).length;
         
         points.push({
@@ -2707,6 +3237,8 @@ export default function App() {
           const regDate = new Date(r.createdAt);
           const matchesLeader = filterLeader === 'Todas as Lideranças' || r.leaderName === filterLeader;
           const matchesCategory = filterCategory === 'Todas as Categorias' || r.category === filterCategory;
+          const matchesRegion = filterRegion === 'Todas as Regiões' || getRegistrationRegion(r) === filterRegion;
+          const matchesOrigem = filterOrigem === 'Todas as Origens' || (r.origem || r.Origem || 'Rua') === filterOrigem;
           
           let matchesGlobalDate = true;
           if (filterStartDate) {
@@ -2719,7 +3251,7 @@ export default function App() {
           }
 
           const matchesInterval = regDate.getMonth() === d.getMonth() && regDate.getFullYear() === d.getFullYear();
-          return matchesLeader && matchesCategory && matchesGlobalDate && matchesInterval;
+          return matchesLeader && matchesCategory && matchesRegion && matchesOrigem && matchesGlobalDate && matchesInterval;
         }).length;
         
         points.push({
@@ -2737,7 +3269,7 @@ export default function App() {
         growth: calculateGrowthValue(points)
       };
     }
-  }, [performancePeriod, visibleRegistrations, filterLeader, filterCategory, filterStartDate, filterEndDate]);
+  }, [performancePeriod, visibleRegistrations, filterLeader, filterCategory, filterRegion, filterOrigem, filterStartDate, filterEndDate]);
 
   // Dynamic Categories calculation for Pie Chart
   const categoriesWithCount = useMemo(() => {
@@ -2818,6 +3350,36 @@ export default function App() {
     }
     return list.sort((a, b) => b.count - a.count);
   }, [filteredRegistrations, registrations, formFields]);
+
+  // Dynamic Origens calculation for Pie Chart
+  const origensWithCount = useMemo(() => {
+    const origensSet = new Set<string>();
+    const defaultOrigins = ['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro'];
+    defaultOrigins.forEach(o => origensSet.add(o));
+    registrations.forEach(r => {
+      const oVal = r.origem || r.Origem;
+      if (oVal) origensSet.add(oVal);
+    });
+
+    const counts: Record<string, number> = {};
+    origensSet.forEach(orig => {
+      counts[orig] = 0;
+    });
+
+    filteredRegistrations.forEach(r => {
+      const origValue = r.origem || r.Origem || 'Rua';
+      counts[origValue] = (counts[origValue] || 0) + 1;
+    });
+
+    const list = Object.entries(counts)
+      .map(([origem, count]) => ({ origem, count }))
+      .filter(item => item.count > 0);
+
+    if (list.length === 0) {
+      return Object.entries(counts).map(([origem]) => ({ origem, count: 0 }));
+    }
+    return list.sort((a, b) => b.count - a.count);
+  }, [filteredRegistrations, registrations]);
 
   // Render application notifications banner
   const renderNotificationBanner = () => {
@@ -2901,6 +3463,7 @@ export default function App() {
       leaderName: selectedLeaderObj.name,
       date: formattedColDate,
       createdAt: new Date().toISOString(),
+      origem: 'Rua',
       ...dynamicFormInput
     };
 
@@ -4060,16 +4623,25 @@ export default function App() {
                 </div>
                 
                 <div className="flex gap-2 shrink-0">
+                  {profile.isAdmin && (
+                    <button 
+                      onClick={() => setShowImportCsvModal(true)}
+                      className="border border-[#c7c4d8] text-[#191c1e] bg-white hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Upload className="w-4 h-4 text-indigo-600" />
+                      <span>Importar CSV/Excel</span>
+                    </button>
+                  )}
                   <button 
                     onClick={() => handleExport('Excel')}
-                    className="border border-[#c7c4d8] text-[#191c1e] hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-colors"
+                    className="border border-[#c7c4d8] text-[#191c1e] hover:bg-[#f2f4f6] px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 transition-colors cursor-pointer"
                   >
                     <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                     <span>Exportar Excel</span>
                   </button>
                   <button 
                     onClick={() => setShowAddRegistrationModal(true)}
-                    className="bg-[#3525cd] hover:bg-[#4f46e5] text-white px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 shadow transition-colors"
+                    className="bg-[#3525cd] hover:bg-[#4f46e5] text-white px-4 py-2 rounded-lg font-semibold text-xs inline-flex items-center gap-2 shadow transition-colors cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>Cadastrar Novo</span>
@@ -4122,6 +4694,17 @@ export default function App() {
                     <option key={idx} value={reg}>{reg}</option>
                   ))}
                 </select>
+
+                <select 
+                  value={filterOrigem} 
+                  onChange={(e) => setFilterOrigem(e.target.value)}
+                  className="bg-white border border-[#c7c4d8] rounded-lg py-2 px-3 text-xs outline-none focus:border-[#4f46e5] text-[#191c1e] font-semibold"
+                >
+                  <option>Todas as Origens</option>
+                  {availableOrigens.map((orig, idx) => (
+                    <option key={idx} value={orig}>{orig}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Large functional registrations table */}
@@ -4132,6 +4715,7 @@ export default function App() {
                       <th className="px-6 py-3">Nome Completo</th>
                       <th className="px-6 py-3">Selo de Liderança</th>
                       <th className="px-6 py-3">Categoria Cadastrada</th>
+                      <th className="px-6 py-3">Origem</th>
                       <th className="px-6 py-3">Período de Entrada</th>
                       <th className="px-6 py-3 text-right">Controles</th>
                     </tr>
@@ -4139,7 +4723,7 @@ export default function App() {
                   <tbody className="divide-y divide-[#eceef0] text-sm text-[#191c1e]">
                     {filteredRegistrations.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-sm text-[#777587]">
+                        <td colSpan={6} className="px-6 py-12 text-center text-sm text-[#777587]">
                           Nenhum cadastro correspondente aos filtros foi encontrado.
                         </td>
                       </tr>
@@ -4152,6 +4736,11 @@ export default function App() {
                             <td className="px-6 py-4">
                               <span className="bg-[#e2dfff] text-[#3323cc] text-[11px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
                                 {reg.category}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/50 text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                                {reg.origem || reg.Origem || 'Rua'}
                               </span>
                             </td>
                             <td className="px-6 py-4 text-xs font-mono text-[#777587]">{formatCollectionDate(reg)}</td>
@@ -4813,7 +5402,7 @@ export default function App() {
               </div>
 
               {/* Advanced multi-select filtering tools with visual date selection */}
-              <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                 <div className="space-y-1">
                   <label className="block text-[11px] font-bold text-[#464555] uppercase tracking-wider">Data Inicial</label>
                   <div className="relative">
@@ -4879,13 +5468,27 @@ export default function App() {
                     ))}
                   </select>
                 </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-[#464555] uppercase tracking-wider">Origem</label>
+                  <select 
+                    value={filterOrigem}
+                    onChange={(e) => setFilterOrigem(e.target.value)}
+                    className="w-full bg-[#f2f4f6] text-xs py-2 px-3 rounded-lg border border-[#eceef0] outline-none font-semibold text-[#191c1e]"
+                  >
+                    <option>Todas as Origens</option>
+                    {availableOrigens.map((orig, idx) => (
+                      <option key={idx} value={orig}>{orig}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* Layout of report graphics in order: Line Performance, Pie Categoria, Pie Região */}
               <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                 
                 {/* 1. Core Dynamic Graphic Line Performance Chart */}
-                <div className="xl:col-span-6 bg-white p-6 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
+                <div className="xl:col-span-12 bg-white p-6 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                     <div>
                       <h3 className="text-base font-bold text-[#191c1e] uppercase tracking-wider">{performanceChartData.title}</h3>
@@ -5067,7 +5670,7 @@ export default function App() {
                 </div>
 
                 {/* 2. Category Pie Chart */}
-                <div className="xl:col-span-3 bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
+                <div className="xl:col-span-4 bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
                   {(() => {
                     const total = categoriesWithCount.reduce((sum, item) => sum + item.count, 0);
                     let accumulatedPercent = 0;
@@ -5151,7 +5754,7 @@ export default function App() {
                 </div>
 
                 {/* 3. Region Pie Chart */}
-                <div className="xl:col-span-3 bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
+                <div className="xl:col-span-4 bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
                   {(() => {
                     const total = regionsWithCount.reduce((sum, item) => sum + item.count, 0);
                     let accumulatedPercent = 0;
@@ -5218,6 +5821,90 @@ export default function App() {
                                       <div className="flex items-center gap-1.5 truncate">
                                         <span className="w-2 rounded-full h-2 flex-shrink-0" style={{ backgroundColor: color }} />
                                         <span className="truncate font-semibold text-[#464555]" title={item.region}>{item.region}</span>
+                                      </div>
+                                      <span className="font-mono font-bold text-[#191c1e] ml-1 flex-shrink-0">
+                                        {item.count} ({percent.toFixed(0)}%)
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* 4. Origem Pie Chart */}
+                <div className="xl:col-span-4 bg-white p-5 rounded-2xl border border-[#eceef0] shadow-sm flex flex-col justify-between">
+                  {(() => {
+                    const total = origensWithCount.reduce((sum, item) => sum + item.count, 0);
+                    let accumulatedPercent = 0;
+                    const colors = [
+                      '#10b981', '#f59e0b', '#4f46e5', '#3b82f6',
+                      '#ec4899', '#8b5cf6', '#14b8a6', '#ef4444'
+                    ];
+
+                    return (
+                      <div className="flex flex-col h-full justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-[#191c1e] uppercase tracking-wider">Por Origem</h3>
+                          <p className="text-[10px] text-[#777587] font-medium leading-tight mt-0.5">Distribuição dos cadastrados com base em sua origem/captação.</p>
+                        </div>
+                        
+                        <div className="flex flex-col items-center justify-center space-y-4 py-4 my-auto">
+                          {total === 0 ? (
+                            <div className="text-xs text-[#777587] py-12 text-center font-medium font-sans">Sem cadastros para o filtro.</div>
+                          ) : (
+                            <>
+                              <div className="relative w-32 h-32 flex-shrink-0">
+                                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                                  <circle cx="50" cy="50" r="30" fill="transparent" stroke="#f2f4f6" strokeWidth="12" />
+                                  {origensWithCount.map((item, idx) => {
+                                    const percent = (item.count / total) * 100;
+                                    const dashArray = `${percent * 1.885} 188.5`;
+                                    const dashOffset = -(accumulatedPercent * 1.885);
+                                    accumulatedPercent += percent;
+                                    const color = colors[idx % colors.length];
+
+                                    return (
+                                      <circle
+                                        key={idx}
+                                        cx="50"
+                                        cy="50"
+                                        r="30"
+                                        fill="transparent"
+                                        stroke={color}
+                                        strokeWidth="12"
+                                        strokeDasharray={dashArray}
+                                        strokeDashoffset={dashOffset}
+                                        className="transition-all duration-500 ease-in-out hover:stroke-opacity-80"
+                                      />
+                                    );
+                                  })}
+                                  <circle cx="50" cy="50" r="24" fill="#ffffff" />
+                                  <g className="transform rotate-90 origin-center">
+                                    <text x="50" y="48" textAnchor="middle" className="text-[14px] font-extrabold fill-[#191c1e] font-sans">
+                                      {total}
+                                    </text>
+                                    <text x="50" y="58" textAnchor="middle" className="text-[6px] font-bold fill-[#777587] uppercase tracking-wider">
+                                      Total
+                                    </text>
+                                  </g>
+                                </svg>
+                              </div>
+
+                              <div className="w-full space-y-1 max-h-36 overflow-y-auto pr-1 select-none">
+                                {origensWithCount.map((item, idx) => {
+                                  const percent = total > 0 ? (item.count / total) * 100 : 0;
+                                  const color = colors[idx % colors.length];
+                                  return (
+                                    <div key={idx} className="flex items-center justify-between text-[11px] text-[#464555]">
+                                      <div className="flex items-center gap-1.5 truncate">
+                                        <span className="w-2 rounded-full h-2 flex-shrink-0" style={{ backgroundColor: color }} />
+                                        <span className="truncate font-semibold text-[#464555]" title={item.origem}>{item.origem}</span>
                                       </div>
                                       <span className="font-mono font-bold text-[#191c1e] ml-1 flex-shrink-0">
                                         {item.count} ({percent.toFixed(0)}%)
@@ -5423,6 +6110,147 @@ export default function App() {
 
       {/* 4. MODALS CONTAINER */}
       
+      {/* CSV Contact Import Modal */}
+      {showImportCsvModal && (
+        <div className="fixed inset-0 bg-[#181445]/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-[#eceef0] shadow-lg max-w-xl w-full overflow-hidden text-left animate-fade-in animate-scale-up">
+            <div className="p-6 bg-[#3525cd] text-white flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-lg leading-tight">Importar Contatos (CSV / Excel)</h3>
+                <p className="text-[#c4c1fb] text-xs">Insira um arquivo CSV ou planilha Excel (.xlsx, .xls) de contatos e selecione a origem.</p>
+              </div>
+              <button onClick={() => {
+                setImportCsvFile(null);
+                setImportCsvRows([]);
+                setImportCsvError('');
+                setShowImportCsvModal(false);
+              }} className="bg-white/10 hover:bg-white/20 p-1.5 rounded-lg text-white transition-colors cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Origin Selector */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider">Origem dos Contatos</label>
+                <SearchableSelect
+                  value={importCsvOrigin}
+                  onChange={(val) => setImportCsvOrigin(val)}
+                  placeholder="Selecione a origem..."
+                  options={['Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro']}
+                />
+              </div>
+
+              {/* Drag and Drop Zone */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider">Arquivo CSV ou Excel</label>
+                <div 
+                  onDragOver={(e) => { e.preventDefault(); setIsCsvDragOver(true); }}
+                  onDragLeave={() => setIsCsvDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsCsvDragOver(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleCsvFileChange(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  onClick={() => csvFileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 ${
+                    isCsvDragOver 
+                      ? 'border-[#3525cd] bg-[#3525cd]/5 shadow-inner' 
+                      : importCsvFile 
+                        ? 'border-emerald-300 bg-emerald-50/20' 
+                        : 'border-[#c7c4d8] hover:border-[#3525cd] hover:bg-gray-50'
+                  }`}
+                >
+                  <input 
+                    type="file" 
+                    accept=".csv, .xlsx, .xls"
+                    ref={csvFileInputRef}
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleCsvFileChange(e.target.files[0]);
+                      }
+                    }}
+                  />
+                  <div className="flex flex-col items-center gap-2">
+                    {importCsvFile ? (
+                      <>
+                        <FileSpreadsheet className="w-10 h-10 text-emerald-600 animate-pulse" />
+                        <p className="text-xs font-bold text-gray-800">{importCsvFile.name}</p>
+                        <p className="text-[10px] text-gray-400">({(importCsvFile.size / 1024).toFixed(1)} KB)</p>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-10 h-10 text-gray-400" />
+                        <p className="text-xs font-semibold text-gray-700">Arraste seu arquivo .csv, .xlsx ou .xls aqui ou <span className="text-[#3525cd] underline">clique para selecionar</span></p>
+                        <p className="text-[10px] text-gray-400 font-medium">Campos obrigatórios do cabeçalho: <strong>Nome, E-mail, telefone</strong></p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Error Display */}
+              {importCsvError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl p-3 flex items-start gap-2">
+                  <span className="font-bold shrink-0">Aviso:</span>
+                  <p>{importCsvError}</p>
+                </div>
+              )}
+
+              {/* Data Preview */}
+              {importCsvRows.length > 0 && !importCsvError && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full">
+                      {importCsvRows.length} contatos prontos para importar
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-medium">Exibindo primeiras 3 linhas</span>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 border border-gray-150 max-h-36 overflow-y-auto text-xs font-mono space-y-1.5">
+                    {importCsvRows.slice(0, 3).map((row, idx) => (
+                      <div key={idx} className="flex justify-between items-center border-b border-gray-200/50 pb-1.5 last:border-none last:pb-0">
+                        <span className="font-bold text-gray-800 truncate max-w-[150px]">{row.nome}</span>
+                        <span className="text-gray-500 truncate max-w-[150px]">{row.email}</span>
+                        <span className="text-gray-400">{row.telefone}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 bg-gray-50 flex justify-end gap-3 border-t border-gray-100">
+              <button 
+                onClick={() => {
+                  setImportCsvFile(null);
+                  setImportCsvRows([]);
+                  setImportCsvError('');
+                  setShowImportCsvModal(false);
+                }}
+                className="px-4 py-2 border border-[#c7c4d8] rounded-xl text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleImportCsvSubmit}
+                disabled={importCsvRows.length === 0 || !!importCsvError}
+                className={`px-5 py-2 rounded-xl text-xs font-semibold shadow transition-all flex items-center gap-2 cursor-pointer ${
+                  importCsvRows.length === 0 || !!importCsvError
+                    ? 'bg-gray-200 text-gray-400 border border-gray-300 cursor-not-allowed opacity-50'
+                    : 'bg-[#3525cd] hover:bg-[#4f46e5] text-white'
+                }`}
+              >
+                <Check className="w-4 h-4" />
+                <span>Importar {importCsvRows.length > 0 ? `${importCsvRows.length} Contatos` : 'Contatos'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Dynamic Member Add Form Modal */}
       {showAddRegistrationModal && (
         <div className="fixed inset-0 bg-[#181445]/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
@@ -5571,6 +6399,15 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider block">Origem</span>
+                  <div>
+                    <span className="inline-block bg-emerald-50 text-emerald-700 border border-emerald-200/50 text-xs font-bold font-mono px-3 py-1 rounded-full uppercase tracking-wider">
+                      {viewingRegistration.origem || viewingRegistration.Origem || 'Rua'}
+                    </span>
+                  </div>
+                </div>
+
 
 
                 {formFields
@@ -5664,7 +6501,7 @@ export default function App() {
                 />
               </div>
 
-              <div>
+               <div>
                 <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Categoria</label>
                 <SearchableSelect
                   value={editRegCategory}
@@ -5675,6 +6512,16 @@ export default function App() {
                       ? [editRegCategory, ...categoriesList]
                       : categoriesList
                   }
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#191c1e] uppercase tracking-wider mb-1.5">Origem</label>
+                <SearchableSelect
+                  value={editRegOrigem}
+                  onChange={(val) => setEditRegOrigem(val)}
+                  placeholder="Selecione a origem..."
+                  options={['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro']}
                 />
               </div>
 

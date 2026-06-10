@@ -46,7 +46,7 @@ export async function testSupabaseConnection(): Promise<boolean> {
 export function checkIfEmailIsAdmin(email: string): boolean {
   if (!email) return false;
   const e = email.trim().toLowerCase();
-  return e === 'contato@ricardoivanov.com.br' || e === 'ana.carolina@lideranca.com';
+  return e === 'contato@ricardoivanov.com.br' || e === 'ana.carolina@lideranca.com' || e === 'ricardoiva9@gmail.com' || e === 'contato@slapp.com.br';
 }
 
 // ==========================================
@@ -282,6 +282,7 @@ export async function fetchRegistrations(): Promise<Registration[] | null> {
       leaderName: item.leader_name || '',
       date: item.date || '',
       createdAt: item.created_at || new Date().toISOString(),
+      origem: item.origem || item.dynamic_data?.origem || item.dynamic_data?.Origem || 'Rua',
       ...(item.dynamic_data || {})
     }));
   } catch (err) {
@@ -294,20 +295,38 @@ export async function upsertRegistration(reg: Registration): Promise<boolean> {
   if (!supabase) return false;
   try {
     // Extract static attributes and bundle everything else into dynamic_data
-    const { id, name, category, leaderId, leaderName, date, createdAt, ...dynamicData } = reg;
+    const { id, name, category, leaderId, leaderName, date, createdAt, origem, Origem, ...dynamicData } = reg;
+    const finalOrigem = origem || Origem || 'Rua';
+    const payload: any = {
+      id,
+      name,
+      category,
+      leader_id: leaderId,
+      leader_name: leaderName,
+      date,
+      created_at: createdAt,
+      origem: finalOrigem,
+      dynamic_data: {
+        ...dynamicData,
+        origem: finalOrigem
+      }
+    };
     const { error } = await supabase
       .from('registrations')
-      .upsert({
-        id,
-        name,
-        category,
-        leader_id: leaderId,
-        leader_name: leaderName,
-        date,
-        created_at: createdAt,
-        dynamic_data: dynamicData
-      });
-    if (error) throw error;
+      .upsert(payload);
+    if (error) {
+      if (error.message && (error.message.includes('column') || error.message.includes('relation'))) {
+        console.warn('Supabase dynamic column "origem" fallback triggered:', error.message);
+        const retryPayload = { ...payload };
+        delete retryPayload.origem;
+        const { error: retryError } = await supabase
+          .from('registrations')
+          .upsert(retryPayload);
+        if (retryError) throw retryError;
+      } else {
+        throw error;
+      }
+    }
     return true;
   } catch (err) {
     console.error('Error saving registration to Supabase:', err);

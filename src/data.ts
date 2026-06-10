@@ -7,6 +7,7 @@ export const INITIAL_PROFILE: UserProfile = {
   cpf: '123.456.789-00',
   avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBh_aA6HorE7nq35g0h5HXyxEyRTqTXGmZ_Fsa7YgdsDoTadgIgarBa2XgaNN4iE0ZnTJpMNsX9v84nqtlr4nbv1hz9zheo6r8WC3Y6YDE_BTbsETZaAEzbnye9ERN0Z7w_jcpm1U5yurwwTXKc7pD53N5G7c_hTB_E5JUzFob_2W1pcigxjQ3V-NKuo8lx-jG3vYgSltp4x9ZLAhmbxnC68qi0Uq3GnGWRn6np0601sm-oChjpvTzNC9mXmSF9BgtPj4jtQGSR-Wp1',
   password: 'admin123',
+  isAdmin: true,
 };
 
 export const INITIAL_LEADERS: Leader[] = [
@@ -223,5 +224,6 @@ export const CATEGORIES_LIST = [
   'Empreendedores',
   'Estudantes',
   'Saúde',
-  'Outros'
+  'Outros',
+  'Outro'
 ];
