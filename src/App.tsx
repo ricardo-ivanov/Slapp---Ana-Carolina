@@ -333,12 +333,20 @@ export default function App() {
 
   // Persist values in localStorage
   useEffect(() => {
-    localStorage.setItem('isLoggedIn', JSON.stringify(isLoggedIn));
-    localStorage.setItem('admin_profile', JSON.stringify(profile));
-    localStorage.setItem('admin_leaders', JSON.stringify(leaders));
-    localStorage.setItem('admin_registrations', JSON.stringify(registrations));
-    localStorage.setItem('admin_form_fields', JSON.stringify(formFields));
-    localStorage.setItem('active_view', activeView);
+    try {
+      localStorage.setItem('isLoggedIn', JSON.stringify(isLoggedIn));
+      localStorage.setItem('admin_profile', JSON.stringify(profile));
+      localStorage.setItem('admin_leaders', JSON.stringify(leaders));
+      
+      // Limit registrations in local storage to a safe subset of max 1000 records to prevent QuotaExceededError
+      const fallbackSubset = registrations.length > 1000 ? registrations.slice(0, 1000) : registrations;
+      localStorage.setItem('admin_registrations', JSON.stringify(fallbackSubset));
+      
+      localStorage.setItem('admin_form_fields', JSON.stringify(formFields));
+      localStorage.setItem('active_view', activeView);
+    } catch (e) {
+      console.warn('Local storage quota limit reached or setItem blocked by user preferences:', e);
+    }
   }, [isLoggedIn, profile, leaders, registrations, formFields, activeView]);
 
   // Set default leader selection for new registrations
@@ -624,7 +632,11 @@ export default function App() {
           const defaultOrigins = ['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro'];
           if (dbOrigins && dbOrigins.length > 0) {
             setOriginsList(dbOrigins);
-            localStorage.setItem('admin_origins_list', JSON.stringify(dbOrigins));
+            try {
+              localStorage.setItem('admin_origins_list', JSON.stringify(dbOrigins));
+            } catch (e) {
+              console.warn('Local storage write failed for origins:', e);
+            }
           } else {
             if (isLoggedIn && profile?.isAdmin) {
               await syncContactOriginsInDB(defaultOrigins);
@@ -729,7 +741,11 @@ export default function App() {
 
   // Save origins to localStorage
   useEffect(() => {
-    localStorage.setItem('admin_origins_list', JSON.stringify(originsList));
+    try {
+      localStorage.setItem('admin_origins_list', JSON.stringify(originsList));
+    } catch (e) {
+      console.warn('Local storage write failed for origins:', e);
+    }
   }, [originsList]);
 
   // Contact Origins DB Synchronization Hook (Requires initial load to complete to prevent accidental overwrites)
