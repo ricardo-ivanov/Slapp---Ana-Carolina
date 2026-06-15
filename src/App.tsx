@@ -63,6 +63,8 @@ import {
   deleteFormFieldFromDB,
   fetchCategoriesFromDB,
   syncCategoriesInDB,
+  fetchContactOriginsFromDB,
+  syncContactOriginsInDB,
   supabase
 } from './supabaseClient';
 import {
@@ -189,6 +191,15 @@ export default function App() {
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [editingCategoryIndex, setEditingCategoryIndex] = useState<number | null>(null);
   const [editingCategoryText, setEditingCategoryText] = useState('');
+
+  const [originsList, setOriginsList] = useState<string[]>(() => {
+    const stored = localStorage.getItem('admin_origins_list');
+    return stored ? JSON.parse(stored) : ['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro'];
+  });
+  const [newOriginInput, setNewOriginInput] = useState('');
+  const [editingOriginIndex, setEditingOriginIndex] = useState<number | null>(null);
+  const [editingOriginText, setEditingOriginText] = useState('');
+  const [hasLoadedOrigins, setHasLoadedOrigins] = useState(false);
 
   const [activeView, setActiveView] = useState<ActiveView>(() => {
     const stored = localStorage.getItem('active_view');
@@ -604,6 +615,20 @@ export default function App() {
           }
           setHasLoadedCategories(true);
 
+          // 3b. Fetch Contact Origins
+          const dbOrigins = await fetchContactOriginsFromDB();
+          const defaultOrigins = ['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro'];
+          if (dbOrigins && dbOrigins.length > 0) {
+            setOriginsList(dbOrigins);
+            localStorage.setItem('admin_origins_list', JSON.stringify(dbOrigins));
+          } else {
+            if (isLoggedIn && profile?.isAdmin) {
+              await syncContactOriginsInDB(defaultOrigins);
+            }
+            setOriginsList(defaultOrigins);
+          }
+          setHasLoadedOrigins(true);
+
           // 4. Fetch Registrations
           const dbRegs = await fetchRegistrations();
           const defaultFallback = activeCategories.includes('Outros') ? 'Outros' : activeCategories[0];
@@ -699,6 +724,24 @@ export default function App() {
     };
     syncCategories();
   }, [categoriesList, isSupabaseConnected, isLoadingFromSupabase, isLoggedIn, profile.isAdmin, hasLoadedCategories]);
+
+  // Save origins to localStorage
+  useEffect(() => {
+    localStorage.setItem('admin_origins_list', JSON.stringify(originsList));
+  }, [originsList]);
+
+  // Contact Origins DB Synchronization Hook (Requires initial load to complete to prevent accidental overwrites)
+  useEffect(() => {
+    if (!isSupabaseConnected || isLoadingFromSupabase || !isLoggedIn || !profile.isAdmin || !hasLoadedOrigins) return;
+    const syncOrigins = async () => {
+      try {
+        await syncContactOriginsInDB(originsList);
+      } catch (err) {
+        console.error('Failed to sync contact origins to Supabase:', err);
+      }
+    };
+    syncOrigins();
+  }, [originsList, isSupabaseConnected, isLoadingFromSupabase, isLoggedIn, profile.isAdmin, hasLoadedOrigins]);
 
   // Trigger brief alert banners
   const triggerNotification = (message: string, type: 'success' | 'info' | 'error' | 'warning' = 'success') => {
@@ -2931,6 +2974,125 @@ export default function App() {
     setEditingCategoryText('');
   };
 
+  // Contact Origins CRUD Handlers
+  const handleAddOrigin = () => {
+    const trimmed = newOriginInput.trim();
+    if (!trimmed) return;
+    if (originsList.includes(trimmed)) {
+      triggerNotification('Esta origem já existe!', 'warning');
+      return;
+    }
+    setOriginsList([...originsList, trimmed]);
+    setNewOriginInput('');
+    triggerNotification('Origem adicionada com sucesso!', 'success');
+  };
+
+  const handleDeleteOrigin = (origToDelete: string) => {
+    const remaining = originsList.filter(o => o !== origToDelete);
+    setOriginsList(remaining);
+    
+    // Auto-update any registrations that were in this deleted origin, moving them to another valid origin or 'Outro'
+    const defaultFallback = remaining.includes('Outro') ? 'Outro' : (remaining[0] || 'Outro');
+    setRegistrations(prev => prev.map(r => {
+      let changed = false;
+      const updatedR = { ...r };
+      if (r.origem === origToDelete) {
+        updatedR.origem = defaultFallback;
+        changed = true;
+      }
+      if (r.Origem === origToDelete) {
+        updatedR.Origem = defaultFallback;
+        changed = true;
+      }
+      return changed ? updatedR : r;
+    }));
+
+    if (isSupabaseConnected && supabase) {
+      supabase
+        .from('registrations')
+        .update({ origem: defaultFallback })
+        .eq('origem', origToDelete)
+        .then(({ error }) => {
+          if (error) console.error('Error cascade-updating registrations after origin delete:', error);
+        });
+    }
+
+    triggerNotification('Origem de contato removida!', 'success');
+  };
+
+  const handleStartEditOrigin = (index: number, currentText: string) => {
+    setEditingOriginIndex(index);
+    setEditingOriginText(currentText);
+  };
+
+  const handleSaveEditOrigin = (index: number) => {
+    const trimmed = editingOriginText.trim();
+    if (!trimmed) return;
+    if (originsList.includes(trimmed) && originsList[index] !== trimmed) {
+      triggerNotification('Esta origem já existe!', 'warning');
+      return;
+    }
+    
+    const updated = [...originsList];
+    const oldName = updated[index];
+    updated[index] = trimmed;
+    setOriginsList(updated);
+    
+    // Auto-update any registrations that were using this old origin
+    setRegistrations(prev => prev.map(r => {
+      let isChanged = false;
+      const updatedR = { ...r };
+      if (r.origem === oldName) {
+        updatedR.origem = trimmed;
+        isChanged = true;
+      }
+      if (r.Origem === oldName) {
+        updatedR.Origem = trimmed;
+        isChanged = true;
+      }
+      return isChanged ? updatedR : r;
+    }));
+
+    if (isSupabaseConnected && supabase) {
+      supabase
+        .from('registrations')
+        .update({ origem: trimmed })
+        .eq('origem', oldName)
+        .then(({ error }) => {
+          if (error) console.error('Error cascade-updating registrations after origin edit:', error);
+        });
+    }
+
+    setEditingOriginIndex(null);
+    setEditingOriginText('');
+    triggerNotification('Origem de contato editada!', 'success');
+  };
+
+  const handleCancelEditOrigin = () => {
+    setEditingOriginIndex(null);
+    setEditingOriginText('');
+  };
+
+  const handleMoveOriginUp = (index: number) => {
+    if (index === 0) return;
+    const updated = [...originsList];
+    const temp = updated[index];
+    updated[index] = updated[index - 1];
+    updated[index - 1] = temp;
+    setOriginsList(updated);
+    triggerNotification('Origem movida para cima!', 'success');
+  };
+
+  const handleMoveOriginDown = (index: number) => {
+    if (index === originsList.length - 1) return;
+    const updated = [...originsList];
+    const temp = updated[index];
+    updated[index] = updated[index + 1];
+    updated[index + 1] = temp;
+    setOriginsList(updated);
+    triggerNotification('Origem movida para baixo!', 'success');
+  };
+
   // Support for role-based restricted access (Liderança vs. Admin)
   const visibleRegistrations = useMemo(() => {
     let list = registrations;
@@ -2992,14 +3154,13 @@ export default function App() {
   // Get active list of origens
   const availableOrigens = useMemo(() => {
     const origensSet = new Set<string>();
-    const defaultOrigins = ['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro'];
-    defaultOrigins.forEach(o => origensSet.add(o));
+    originsList.forEach(o => origensSet.add(o));
     registrations.forEach(r => {
       const oVal = r.origem || r.Origem;
       if (oVal) origensSet.add(oVal);
     });
     return Array.from(origensSet);
-  }, [registrations]);
+  }, [registrations, originsList]);
 
   // Dynamic values based on filters in Reports screen
   const filteredRegistrations = visibleRegistrations.filter(r => {
@@ -5038,96 +5199,6 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-
-                  {/* Dynamic Categories Editor Card */}
-                  <div className="bg-white rounded-2xl border border-[#eceef0] p-5 shadow-sm space-y-4 text-left">
-                    <h3 className="text-xs font-bold text-[#191c1e] uppercase tracking-wider flex items-center gap-2 border-b border-[#eceef0] pb-3">
-                      <Layers className="w-4 h-4 text-[#3525cd]" />
-                      <span>Gerenciar Categorias</span>
-                    </h3>
-                    
-                    {/* Category List */}
-                    <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
-                      {categoriesList.map((cat, index) => (
-                        <div 
-                          key={index} 
-                          className="flex items-center justify-between p-2 rounded-lg bg-[#f2f4f6]/60 border border-transparent hover:border-[#eceef0] transition-all group animate-fade-in text-left"
-                        >
-                          {editingCategoryIndex === index ? (
-                            <div className="flex items-center gap-2 w-full">
-                              <input 
-                                type="text"
-                                value={editingCategoryText}
-                                onChange={(e) => setEditingCategoryText(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleSaveEditCategory(index);
-                                  if (e.key === 'Escape') handleCancelEditCategory();
-                                }}
-                                className="flex-1 bg-white border border-[#3525cd] rounded px-2 py-1 text-xs outline-none font-semibold text-[#191c1e]"
-                                autoFocus
-                              />
-                              <button 
-                                onClick={() => handleSaveEditCategory(index)}
-                                className="p-1 hover:bg-[#dcfce7] hover:text-[#166534] text-[#3525cd] rounded transition-colors"
-                                title="Salvar"
-                              >
-                                <Check className="w-3.5 h-3.5" />
-                              </button>
-                              <button 
-                                onClick={handleCancelEditCategory}
-                                className="p-1 hover:bg-red-50 hover:text-red-600 text-[#777587] rounded transition-colors"
-                                title="Cancelar"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <span className="text-xs font-semibold text-[#191c1e] pl-1">{cat}</span>
-                              <div className="flex items-center gap-1">
-                                <button 
-                                  onClick={() => handleStartEditCategory(index, cat)}
-                                  className="p-1 hover:bg-[#e2dfff]/40 text-[#3525cd] rounded transition-colors"
-                                  title="Editar"
-                                >
-                                  <Edit className="w-3.5 h-3.5" />
-                                </button>
-                                <button 
-                                  onClick={() => handleDeleteCategory(cat)}
-                                  className="p-1 hover:bg-red-50 text-[#ba1a1a] rounded transition-colors"
-                                  title="Excluir"
-                                  disabled={categoriesList.length <= 1}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Add Category Input */}
-                    <div className="flex items-center gap-1.5 pt-2 border-t border-[#eceef0]">
-                      <input 
-                        type="text"
-                        placeholder="Nova categoria..."
-                        value={newCategoryInput}
-                        onChange={(e) => setNewCategoryInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleAddCategory();
-                        }}
-                        className="flex-1 bg-[#f2f4f6] border border-transparent hover:border-[#eceef0] focus:border-[#3525cd] focus:bg-white rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-[#191c1e] placeholder-[#777587]"
-                      />
-                      <button 
-                        onClick={handleAddCategory}
-                        className="p-1.5 bg-[#3525cd] hover:bg-[#4f46e5] text-white rounded-lg transition-colors shadow-sm"
-                        title="Adicionar Novo"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 {/* center configuration manager list */}
@@ -5300,6 +5371,205 @@ export default function App() {
                   </div>
                 </div>
 
+              </div>
+
+              {/* Dynamic Categories & Origins side-by-side manager cards */}
+              <div className="mt-8 pt-8 border-t border-[#eceef0] grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Dynamic Categories Editor Card */}
+                <div className="bg-white rounded-2xl border border-[#eceef0] p-5 shadow-sm space-y-4 text-left">
+                  <h3 className="text-xs font-bold text-[#191c1e] uppercase tracking-wider flex items-center gap-2 border-b border-[#eceef0] pb-3">
+                    <Layers className="w-4 h-4 text-[#3525cd]" />
+                    <span>Gerenciar Categorias</span>
+                  </h3>
+                  
+                  {/* Category List */}
+                  <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
+                    {categoriesList.map((cat, index) => (
+                      <div 
+                        key={index} 
+                        className="flex items-center justify-between p-2 rounded-lg bg-[#f2f4f6]/60 border border-transparent hover:border-[#eceef0] transition-all group animate-fade-in text-left"
+                      >
+                        {editingCategoryIndex === index ? (
+                          <div className="flex items-center gap-2 w-full">
+                            <input 
+                              type="text"
+                              value={editingCategoryText}
+                              onChange={(e) => setEditingCategoryText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditCategory(index);
+                                if (e.key === 'Escape') handleCancelEditCategory();
+                              }}
+                              className="flex-1 bg-white border border-[#3525cd] rounded px-2 py-1 text-xs outline-none font-semibold text-[#191c1e]"
+                              autoFocus
+                            />
+                            <button 
+                              onClick={() => handleSaveEditCategory(index)}
+                              className="p-1 hover:bg-[#dcfce7] hover:text-[#166534] text-[#3525cd] rounded transition-colors"
+                              title="Salvar"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                              onClick={handleCancelEditCategory}
+                              className="p-1 hover:bg-red-50 hover:text-red-600 text-[#777587] rounded transition-colors"
+                              title="Cancelar"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="text-xs font-semibold text-[#191c1e] pl-1">{cat}</span>
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={() => handleStartEditCategory(index, cat)}
+                                className="p-1 hover:bg-[#e2dfff]/40 text-[#3525cd] rounded transition-colors"
+                                title="Editar"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteCategory(cat)}
+                                className="p-1 hover:bg-red-50 text-[#ba1a1a] rounded transition-colors"
+                                title="Excluir"
+                                disabled={categoriesList.length <= 1}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add Category Input */}
+                  <div className="flex items-center gap-1.5 pt-2 border-t border-[#eceef0]">
+                    <input 
+                      type="text"
+                      placeholder="Nova categoria..."
+                      value={newCategoryInput}
+                      onChange={(e) => setNewCategoryInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddCategory();
+                      }}
+                      className="flex-1 bg-[#f2f4f6] border border-transparent hover:border-[#eceef0] focus:border-[#3525cd] focus:bg-white rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-[#191c1e] placeholder-[#777587]"
+                    />
+                    <button 
+                      onClick={handleAddCategory}
+                      className="p-1.5 bg-[#3525cd] hover:bg-[#4f46e5] text-white rounded-lg transition-colors shadow-sm"
+                      title="Adicionar Novo"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Dynamic Contact Origins Editor Card */}
+                <div className="bg-white rounded-2xl border border-[#eceef0] p-5 shadow-sm space-y-4 text-left">
+                  <h3 className="text-xs font-bold text-[#191c1e] uppercase tracking-wider flex items-center gap-2 border-b border-[#eceef0] pb-3">
+                    <Settings className="w-4 h-4 text-[#3525cd]" />
+                    <span>Gerenciar Origens</span>
+                  </h3>
+                  
+                  {/* Origin List */}
+                  <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto pr-1">
+                    {originsList.map((orig, index) => (
+                      <div 
+                        key={index} 
+                        className="flex items-center justify-between p-2 rounded-lg bg-[#f2f4f6]/60 border border-transparent hover:border-[#eceef0] transition-all group animate-fade-in text-left"
+                      >
+                        {editingOriginIndex === index ? (
+                          <div className="flex items-center gap-2 w-full">
+                            <input 
+                              type="text"
+                              value={editingOriginText}
+                              onChange={(e) => setEditingOriginText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveEditOrigin(index);
+                                if (e.key === 'Escape') handleCancelEditOrigin();
+                              }}
+                              className="flex-1 bg-white border border-[#3525cd] rounded px-2 py-1 text-xs outline-none font-semibold text-[#191c1e] focus:ring-1 focus:ring-[#3525cd]"
+                              autoFocus
+                            />
+                            <button 
+                              onClick={() => handleSaveEditOrigin(index)}
+                              className="p-1 hover:bg-[#dcfce7] hover:text-[#166534] text-[#3525cd] rounded transition-colors"
+                              title="Salvar"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                              onClick={handleCancelEditOrigin}
+                              className="p-1 hover:bg-red-50 hover:text-red-600 text-[#777587] rounded transition-colors"
+                              title="Cancelar"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="text-xs font-semibold text-[#191c1e] pl-1">{orig}</span>
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={() => handleMoveOriginUp(index)}
+                                disabled={index === 0}
+                                className="p-1 hover:bg-[#e2dfff]/40 text-[#3525cd] disabled:text-gray-300 disabled:hover:bg-transparent rounded transition-colors"
+                                title="Subir Posição"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => handleMoveOriginDown(index)}
+                                disabled={index === originsList.length - 1}
+                                className="p-1 hover:bg-[#e2dfff]/40 text-[#3525cd] disabled:text-gray-300 disabled:hover:bg-transparent rounded transition-colors"
+                                title="Descer Posição"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => handleStartEditOrigin(index, orig)}
+                                className="p-1 hover:bg-[#e2dfff]/40 text-[#3525cd] rounded transition-colors"
+                                title="Editar"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteOrigin(orig)}
+                                className="p-1 hover:bg-red-50 text-[#ba1a1a] rounded transition-colors"
+                                title="Excluir"
+                                disabled={originsList.length <= 1}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add Origin Input */}
+                  <div className="flex items-center gap-1.5 pt-2 border-t border-[#eceef0]">
+                    <input 
+                      type="text"
+                      placeholder="Nova origem..."
+                      value={newOriginInput}
+                      onChange={(e) => setNewOriginInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleAddOrigin();
+                      }}
+                      className="flex-1 bg-[#f2f4f6] border border-transparent hover:border-[#eceef0] focus:border-[#3525cd] focus:bg-white rounded-lg px-2.5 py-1.5 text-xs outline-none font-semibold text-[#191c1e] placeholder-[#777587]"
+                    />
+                    <button 
+                      onClick={handleAddOrigin}
+                      className="p-1.5 bg-[#3525cd] hover:bg-[#4f46e5] text-white rounded-lg transition-colors shadow-sm"
+                      title="Adicionar Origem"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -6137,7 +6407,7 @@ export default function App() {
                   value={importCsvOrigin}
                   onChange={(val) => setImportCsvOrigin(val)}
                   placeholder="Selecione a origem..."
-                  options={['Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro']}
+                  options={originsList}
                 />
               </div>
 
@@ -6521,7 +6791,11 @@ export default function App() {
                   value={editRegOrigem}
                   onChange={(val) => setEditRegOrigem(val)}
                   placeholder="Selecione a origem..."
-                  options={['Rua', 'Meta', 'Sistema Gabinete', 'Eventos e Palestras', 'Outro']}
+                  options={
+                    editRegOrigem && !originsList.includes(editRegOrigem)
+                      ? [editRegOrigem, ...originsList]
+                      : originsList
+                  }
                 />
               </div>
 

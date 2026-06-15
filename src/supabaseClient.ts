@@ -576,3 +576,53 @@ export async function syncCategoriesInDB(categories: string[]): Promise<boolean>
   return false;
 }
 
+// ==========================================
+// CONTACT ORIGINS API HELPERS
+// ==========================================
+export async function fetchContactOriginsFromDB(): Promise<string[] | null> {
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('form_fields')
+      .select('options')
+      .eq('id', 'contact_origins_list_data')
+      .maybeSingle();
+    
+    if (!error && data && Array.isArray(data.options)) {
+      return data.options;
+    }
+  } catch (err) {
+    console.error('Error fetching contact origins from Supabase:', err);
+  }
+
+  return null;
+}
+
+export async function syncContactOriginsInDB(origins: string[]): Promise<boolean> {
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase
+      .from('form_fields')
+      .upsert({
+        id: 'contact_origins_list_data',
+        type: 'select',
+        label: 'Origens de Contatos',
+        placeholder: 'contact_origins',
+        required: false,
+        options: origins,
+        created_at: new Date().toISOString()
+      });
+    
+    if (!error) {
+      return true;
+    }
+  } catch (err) {
+    console.error('Error syncing contact origins to Supabase:', err);
+  }
+
+  return false;
+}
+
+
