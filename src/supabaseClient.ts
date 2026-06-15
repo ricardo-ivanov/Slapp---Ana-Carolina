@@ -354,6 +354,62 @@ export async function upsertRegistration(reg: Registration): Promise<boolean> {
   }
 }
 
+export async function bulkUpsertRegistrations(registrationsList: Registration[]): Promise<boolean> {
+  if (!supabase || registrationsList.length === 0) return false;
+  try {
+    const payloads = registrationsList.map(reg => {
+      const { id, name, category, leaderId, leaderName, date, createdAt, origem, Origem, ...dynamicData } = reg;
+      const finalOrigem = origem || Origem || 'Rua';
+      return {
+        id,
+        name,
+        category,
+        leader_id: leaderId,
+        leader_name: leaderName,
+        date,
+        created_at: createdAt,
+        origem: finalOrigem,
+        dynamic_data: {
+          ...dynamicData,
+          origem: finalOrigem
+        }
+      };
+    });
+
+    const chunkSize = 200;
+    const chunks: any[][] = [];
+    for (let i = 0; i < payloads.length; i += chunkSize) {
+      chunks.push(payloads.slice(i, i + chunkSize));
+    }
+
+    // Process chunk by chunk sequentially for database stability
+    for (const chunk of chunks) {
+      const { error } = await supabase
+        .from('registrations')
+        .upsert(chunk);
+      if (error) {
+        if (error.message && (error.message.includes('column') || error.message.includes('relation'))) {
+          const retryChunk = chunk.map(payload => {
+            const copy = { ...payload };
+            delete copy.origem;
+            return copy;
+          });
+          const { error: retryError } = await supabase
+            .from('registrations')
+            .upsert(retryChunk);
+          if (retryError) throw retryError;
+        } else {
+          throw error;
+        }
+      }
+    }
+    return true;
+  } catch (err) {
+    console.error('Error bulk upserting registrations to Supabase:', err);
+    return false;
+  }
+}
+
 export async function deleteRegistrationFromDB(id: string): Promise<boolean> {
   if (!supabase) return false;
   try {
@@ -372,11 +428,24 @@ export async function deleteRegistrationFromDB(id: string): Promise<boolean> {
 export async function deleteRegistrationsFromDB(ids: string[]): Promise<boolean> {
   if (!supabase || ids.length === 0) return false;
   try {
-    const { error } = await supabase
-      .from('registrations')
-      .delete()
-      .in('id', ids);
-    if (error) throw error;
+    const chunkSize = 150;
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      chunks.push(ids.slice(i, i + chunkSize));
+    }
+
+    // Execute bulk deletions in chunks to bypass PostgREST query string length limits
+    const deletePromises = chunks.map(async (chunk) => {
+      const { error } = await supabase!
+        .from('registrations')
+        .delete()
+        .in('id', chunk);
+      if (error) {
+        throw error;
+      }
+    });
+
+    await Promise.all(deletePromises);
     return true;
   } catch (err) {
     console.error('Error bulk deleting registrations from Supabase:', err);

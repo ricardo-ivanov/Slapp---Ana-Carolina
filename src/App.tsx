@@ -57,6 +57,7 @@ import {
   deleteLeaderFromDB,
   fetchRegistrations,
   upsertRegistration,
+  bulkUpsertRegistrations,
   deleteRegistrationFromDB,
   deleteRegistrationsFromDB,
   fetchFormFields,
@@ -633,9 +634,19 @@ export default function App() {
           setHasLoadedOrigins(true);
 
           // 4. Fetch Registrations
-          const dbRegs = await fetchRegistrations();
+          let dbRegs = await fetchRegistrations();
           const defaultFallback = activeCategories.includes('Outros') ? 'Outros' : activeCategories[0];
           if (dbRegs && dbRegs.length > 0) {
+            // Automatically clean up old test registrations if present
+            const testIds = ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10'];
+            const hasTestRegs = dbRegs.some(r => testIds.includes(r.id));
+            if (hasTestRegs) {
+              if (connected && isLoggedIn && profile?.isAdmin) {
+                deleteRegistrationsFromDB(testIds).catch(err => console.error('Error auto-cleaning test registrations:', err));
+              }
+              dbRegs = dbRegs.filter(r => !testIds.includes(r.id));
+            }
+
             // Instantly harmonize registrations database entries with current live categories
             const sanitizedRegs = dbRegs.map(r => {
               if (!r.category || !activeCategories.includes(r.category)) {
@@ -650,19 +661,7 @@ export default function App() {
             });
             setRegistrations(sanitizedRegs);
           } else {
-            const seededRegs = INITIAL_REGISTRATIONS.map(r => {
-              if (!r.category || !activeCategories.includes(r.category)) {
-                return { ...r, category: defaultFallback };
-              }
-              return r;
-            });
-            // Only admins should seed initial registrations
-            if (isLoggedIn && profile?.isAdmin) {
-              for (const reg of seededRegs) {
-                await upsertRegistration(reg);
-              }
-            }
-            setRegistrations(seededRegs);
+            setRegistrations([]);
           }
 
           // 5. Fetch Form Fields
@@ -1519,9 +1518,13 @@ export default function App() {
       // First, upsert target leader to ensure no foreign key violation occurs in the registrations table
       upsertLeader({ ...targetLeader!, registrationCount: targetLeader!.registrationCount + newRegs.length })
         .then(() => {
-          newRegs.forEach(reg => {
-            upsertRegistration(reg).catch(err => console.error("Error upserting imported registration:", err));
-          });
+          bulkUpsertRegistrations(newRegs)
+            .then((success) => {
+              if (!success) {
+                console.error("Some registrations failed to insert during bulk import.");
+              }
+            })
+            .catch(err => console.error("Error bulk upserting imported registrations:", err));
         })
         .catch(err => console.error("Failed to upsert target leader for CSV registrations:", err));
     }
