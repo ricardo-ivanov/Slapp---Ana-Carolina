@@ -5092,6 +5092,8 @@ export default function App() {
                         <option value={50}>50 por página</option>
                         <option value={100}>100 por página</option>
                         <option value={200}>200 por página</option>
+                        <option value={500}>500 por página</option>
+                        <option value={1000}>1000 por página</option>
                       </select>
                     </div>
                   </div>
