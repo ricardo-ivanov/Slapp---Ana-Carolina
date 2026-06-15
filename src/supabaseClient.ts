@@ -349,6 +349,21 @@ export async function deleteRegistrationFromDB(id: string): Promise<boolean> {
   }
 }
 
+export async function deleteRegistrationsFromDB(ids: string[]): Promise<boolean> {
+  if (!supabase || ids.length === 0) return false;
+  try {
+    const { error } = await supabase
+      .from('registrations')
+      .delete()
+      .in('id', ids);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error('Error bulk deleting registrations from Supabase:', err);
+    return false;
+  }
+}
+
 // ==========================================
 // FORM FIELDS API HELPERS
 // ==========================================

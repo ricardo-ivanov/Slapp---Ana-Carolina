@@ -58,6 +58,7 @@ import {
   fetchRegistrations,
   upsertRegistration,
   deleteRegistrationFromDB,
+  deleteRegistrationsFromDB,
   fetchFormFields,
   upsertFormField,
   deleteFormFieldFromDB,
@@ -229,8 +230,10 @@ export default function App() {
   const [viewingLeaderQR, setViewingLeaderQR] = useState<Leader | null>(null);
 
   const [viewingRegistration, setViewingRegistration] = useState<Registration | null>(null);
+  const [selectedRegistrationIds, setSelectedRegistrationIds] = useState<string[]>([]);
   const [editingRegistration, setEditingRegistration] = useState<Registration | null>(null);
   const [registrationToDelete, setRegistrationToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [leaderToDelete, setLeaderToDelete] = useState<{ id: string; name: string } | null>(null);
   const [editRegName, setEditRegName] = useState('');
   const [editRegLeaderId, setEditRegLeaderId] = useState('');
@@ -2486,6 +2489,68 @@ export default function App() {
       triggerNotification(`Cadastro de "${registrationToDelete.name}" foi excluído.`, 'info');
       setRegistrationToDelete(null);
     }
+  };
+
+  const handleBulkDeleteRegistrations = () => {
+    if (selectedRegistrationIds.length === 0) {
+      triggerNotification('Nenhum cadastro selecionado.', 'warning');
+      return;
+    }
+    
+    // Check permission of each selected registration if not admin
+    if (!profile.isAdmin) {
+      const forbidden = selectedRegistrationIds.some(id => {
+        const reg = registrations.find(r => r.id === id);
+        return reg && reg.leaderId !== profile.id && reg.leaderName !== profile.name && reg.leaderEmail !== profile.email;
+      });
+      if (forbidden) {
+        triggerNotification('Você só pode remover cadastros feitos por você mesmo.', 'error');
+        return;
+      }
+    }
+
+    setShowBulkDeleteConfirm(true);
+  };
+
+  const confirmBulkDeleteRegistrations = async () => {
+    const idsToDelete = [...selectedRegistrationIds];
+    if (idsToDelete.length === 0) return;
+
+    // Filter registrations
+    setRegistrations(prev => prev.filter(r => !idsToDelete.includes(r.id)));
+
+    if (isSupabaseConnected) {
+      try {
+        await deleteRegistrationsFromDB(idsToDelete);
+
+        // Update counts of the leaders associated with the deleted registrations
+        const deletedRegList = registrations.filter(r => idsToDelete.includes(r.id));
+        const countByLeader: Record<string, number> = {};
+        deletedRegList.forEach(reg => {
+          if (reg.leaderId) {
+            countByLeader[reg.leaderId] = (countByLeader[reg.leaderId] || 0) + 1;
+          }
+        });
+
+        // Set local leader count updates and persist them to DB
+        setLeaders(prevLeaders => 
+          prevLeaders.map(l => {
+            if (countByLeader[l.id]) {
+              const updatedCount = Math.max(0, l.registrationCount - countByLeader[l.id]);
+              upsertLeader({ ...l, registrationCount: updatedCount }).catch(console.error);
+              return { ...l, registrationCount: updatedCount };
+            }
+            return l;
+          })
+        );
+      } catch (err) {
+        console.error('Erro de sincronização na exclusão em massa:', err);
+      }
+    }
+
+    triggerNotification(`${idsToDelete.length} cadastros excluídos em massa com sucesso.`, 'success');
+    setSelectedRegistrationIds([]);
+    setShowBulkDeleteConfirm(false);
   };
 
   const handleViewRegistration = (reg: Registration) => {
@@ -4868,11 +4933,63 @@ export default function App() {
                 </select>
               </div>
 
+              {/* Bulk operations/selection actions bar */}
+              {selectedRegistrationIds.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-red-50 border border-red-100 p-4 rounded-xl animate-fade-in gap-3 text-left">
+                  <div className="flex items-center gap-2.5 text-red-700">
+                    <Trash2 className="w-5 h-5 text-red-600 shrink-0" />
+                    <div>
+                      <span className="text-sm font-bold text-red-800">{selectedRegistrationIds.length} {selectedRegistrationIds.length === 1 ? 'cadastro selecionado' : 'cadastros selecionados'}</span>
+                      <p className="text-xs text-red-600/80 mt-0.5">Deseja excluir permanentemente todos os registros selecionados de uma vez?</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      onClick={() => setSelectedRegistrationIds([])}
+                      className="px-3 py-1.5 hover:bg-red-100 text-red-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Limpar Seleção
+                    </button>
+                    <button
+                      onClick={handleBulkDeleteRegistrations}
+                      className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer"
+                    >
+                      Excluir em Massa ({selectedRegistrationIds.length})
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Large functional registrations table */}
               <div className="overflow-x-auto rounded-xl border border-[#eceef0] shadow-sm">
                 <table className="w-full text-left" style={{ minWidth: '1100px', tableLayout: 'auto' }}>
                   <thead className="bg-[#f2f4f6] text-[#464555] text-[11px] uppercase tracking-wider whitespace-nowrap">
                     <tr>
+                      <th className="px-4 py-3 w-12 text-center">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-[#c7c4d8] text-[#3525cd] focus:ring-[#3525cd] accent-[#3525cd] cursor-pointer"
+                          checked={
+                            filteredRegistrations.length > 0 && 
+                            filteredRegistrations.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).every(reg => selectedRegistrationIds.includes(reg.id))
+                          }
+                          onChange={(e) => {
+                            const pageRegs = filteredRegistrations.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+                            if (e.target.checked) {
+                              const newSelection = [...selectedRegistrationIds];
+                              pageRegs.forEach(reg => {
+                                if (!newSelection.includes(reg.id)) {
+                                  newSelection.push(reg.id);
+                                }
+                              });
+                              setSelectedRegistrationIds(newSelection);
+                            } else {
+                              const pageIds = pageRegs.map(reg => reg.id);
+                              setSelectedRegistrationIds(selectedRegistrationIds.filter(id => !pageIds.includes(id)));
+                            }
+                          }}
+                        />
+                      </th>
                       <th className="px-6 py-3">Nome Completo</th>
                       <th className="px-6 py-3">Selo de Liderança</th>
                       <th className="px-6 py-3">Categoria Cadastrada</th>
@@ -4884,14 +5001,29 @@ export default function App() {
                   <tbody className="divide-y divide-[#eceef0] text-sm text-[#191c1e]">
                     {filteredRegistrations.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-sm text-[#777587]">
+                        <td colSpan={7} className="px-6 py-12 text-center text-sm text-[#777587]">
                           Nenhum cadastro correspondente aos filtros foi encontrado.
                         </td>
                       </tr>
                     ) : (
                       filteredRegistrations.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((reg) => {
+                        const isRowSelected = selectedRegistrationIds.includes(reg.id);
                         return (
-                          <tr key={reg.id} className="hover:bg-[#f7f9fb] transition-colors whitespace-nowrap">
+                          <tr key={reg.id} className={`hover:bg-[#f7f9fb] transition-colors whitespace-nowrap ${isRowSelected ? 'bg-[#3525cd]/5 hover:bg-[#3525cd]/10' : ''}`}>
+                            <td className="px-4 py-4 w-12 text-center">
+                              <input
+                                type="checkbox"
+                                className="w-4 h-4 rounded border-[#c7c4d8] text-[#3525cd] focus:ring-[#3525cd] accent-[#3525cd] cursor-pointer"
+                                checked={isRowSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedRegistrationIds([...selectedRegistrationIds, reg.id]);
+                                  } else {
+                                    setSelectedRegistrationIds(selectedRegistrationIds.filter(id => id !== reg.id));
+                                  }
+                                }}
+                              />
+                            </td>
                             <td className="px-6 py-4 font-bold text-[#191c1e]">{reg.name}</td>
                             <td className="px-6 py-4 text-[#777587] font-medium">{reg.leaderName}</td>
                             <td className="px-6 py-4">
@@ -7081,6 +7213,36 @@ export default function App() {
                   className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-colors shadow-sm"
                 >
                   Sim, Excluir
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 bg-[#181445]/40 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl border border-[#eceef0] shadow-lg max-w-sm w-full overflow-hidden text-left animate-scale-up">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-lg text-[#191c1e] mb-2">Confirmar Exclusão em Massa</h3>
+              <p className="text-sm text-[#777587] mb-6">
+                Deseja realmente excluir permanentemente os <strong className="text-[#191c1e]">{selectedRegistrationIds.length} cadastros</strong> selecionados? Esta ação é irreversível e removerá todos os dados desses contatos definitivamente.
+              </p>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={() => setShowBulkDeleteConfirm(false)}
+                  className="flex-1 px-4 py-2.5 border border-[#c7c4d8] text-xs font-semibold rounded-xl hover:bg-[#f2f4f6] text-[#464555] transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmBulkDeleteRegistrations}
+                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition-colors shadow-sm"
+                >
+                  Sim, Excluir Todos
                 </button>
               </div>
             </div>
